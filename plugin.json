@@ -1,0 +1,19 @@
+{
+  "slug": "MyLilRecycler",
+  "name": "My lil Recycler",
+  "version": "2.0.0",
+  "license": "MIT",
+  "brand": "A_Development",
+  "author": "Ari Klopfer",
+  "authorEmail": "arik@adevelopment.dev",
+  "authorUrl": "https://adevelopment.dev",
+  "pluginUrl": "https://github.com/Adev-io/my-lil-recycler",
+  "manualUrl": "https://github.com/Adev-io/my-lil-recycler#readme",
+  "sourceUrl": "https://github.com/Adev-io/my-lil-recycler",
+  "donateUrl": "",
+  "changelogUrl": "https://github.com/Adev-io/my-lil-recycler/releases",
+  "minRackVersion": "2.0.0",
+  "modules": [
+    { "slug": "Recycler", "name": "My lil Recycler", "description": "Sample flipper: scans a folder, finds tempo- and key-locked combos of drums, bass, melody and texture, stretches them to your clock and root, re-roll with a chaos knob, four stereo stems out", "tags": ["Sampler", "Random", "Utility"] }
+  ]
+}
