@@ -1,0 +1,58 @@
+{
+ "version": "2.6.6",
+ "modules": [
+  {
+   "id": 1,
+   "plugin": "MyLilRecycler",
+   "model": "Recycler",
+   "version": "2.0.0",
+   "params": [],
+   "pos": [
+    0,
+    0
+   ],
+   "data": {
+    "folder": "C:\\Users\\Arikl\\dev\\active\\my-lil-recycler\\build\\fixtures",
+    "run": true,
+    "bpm": 120,
+    "root": 0,
+    "minor": true,
+    "bars": 2,
+    "chaos": 0.25,
+    "seed": 1,
+    "analysisCap": 60,
+    "slots": [
+     {
+      "path": "",
+      "locked": false,
+      "level": 0.8,
+      "k": 0,
+      "s": 0
+     },
+     {
+      "path": "",
+      "locked": false,
+      "level": 0.8,
+      "k": 0,
+      "s": 0
+     },
+     {
+      "path": "",
+      "locked": false,
+      "level": 0.8,
+      "k": 0,
+      "s": 0
+     },
+     {
+      "path": "",
+      "locked": false,
+      "level": 0.8,
+      "k": 0,
+      "s": 0
+     }
+    ]
+   }
+  }
+ ],
+ "cables": []
+}
