@@ -1,11 +1,334 @@
-// test_analysis.h: spectral frames, onset detection and the five features against synthetic signals at 22 050 Hz.
+// test_analysis.h: frames, onsets, features, tempo, loop snap, key, roles, tags and analyse() against synthetic signals.
 // Author: Ari Klopfer / A_Development. MIT
 #pragma once
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <string>
 #include "Analysis.h"
 #include "check.h"
 #include "signals.h"
+
+// tempo (ACF of the mean-removed ODF + octave candidates), loop snap (file length as the clock) and the file-name tag
+inline void testTempo()
+{
+    using namespace recycler;
+    const int R = analysis::RATE;
+    std::printf ("-- tempo\n");
+    auto fluxOf = [] (const std::vector<float>& mono) { return analysis::odf (analysis::frames (mono)); };
+    auto secondsOf = [&] (const std::vector<float>& mono) { return (float) mono.size() / (float) R; };
+
+    for (float bpm : { 93.f, 120.f, 174.f })
+    {
+        const std::vector<float> track = sig::clickTrack (bpm, 4, R);
+        float conf = 0.f, snapped = 0.f;
+        std::vector<float> cand;
+        const float t = analysis::tempo (fluxOf (track), conf, &cand);
+        char what[96];
+        std::snprintf (what, sizeof what, "clicks %.0f BPM: tempo() within +-1 BPM", bpm);
+        check (near (t, bpm, 1.0), what, t);
+        std::snprintf (what, sizeof what, "clicks %.0f BPM: tempoConf >= 0.8", bpm);
+        check (conf >= 0.8f, what, conf);
+        const int bars = analysis::loopSnap (secondsOf (track), cand, snapped);
+        std::snprintf (what, sizeof what, "clicks %.0f BPM: loopSnap -> 4 bars", bpm);
+        check (bars == 4, what, bars);
+        std::snprintf (what, sizeof what, "clicks %.0f BPM: snapped tempo within +-0.05", bpm);
+        check (near (snapped, bpm, 0.05), what, snapped);
+    }
+    for (float bpm : { 93.f, 120.f, 174.f })
+    {
+        const std::vector<float> track = sig::clickTrack (bpm, 4, R, 15.f, 11);
+        float conf = 0.f, snapped = 0.f;
+        std::vector<float> cand;
+        const float t = analysis::tempo (fluxOf (track), conf, &cand);
+        char what[96];
+        std::snprintf (what, sizeof what, "clicks %.0f BPM, 15 ms jitter: tempo() within +-2 BPM", bpm);
+        check (near (t, bpm, 2.0), what, t);
+        const int bars = analysis::loopSnap (secondsOf (track), cand, snapped);
+        std::snprintf (what, sizeof what, "clicks %.0f BPM, 15 ms jitter: loopSnap -> 4 bars", bpm);
+        check (bars == 4, what, bars);
+    }
+    {
+        const std::vector<float> track = sig::clickTrack (100.f, 2, R);
+        float conf = 0.f, snapped = 0.f;
+        std::vector<float> cand;
+        analysis::tempo (fluxOf (track), conf, &cand);
+        const int bars = analysis::loopSnap (secondsOf (track), cand, snapped);
+        check (bars == 2, "2-bar loop 100 BPM: loopSnap -> 2 bars", bars);
+        check (near (snapped, 100.0, 0.05), "2-bar loop 100 BPM: snapped tempo 100 +- 0.05", snapped);
+    }
+    {
+        std::vector<float> shot (sig::len (1.5f, R), 0.f);
+        sig::Rng rng (1);
+        sig::burst (shot, 0, R, 5.f, 1.f, 0.8f, rng);
+        float conf = -1.f, snapped = -1.f;
+        std::vector<float> cand;
+        const float t = analysis::tempo (fluxOf (shot), conf, &cand);
+        check (t == 0.f, "1.5 s one-shot: tempo 0", t);
+        check (conf == 0.f, "1.5 s one-shot: tempoConf 0", conf);
+        check (analysis::loopSnap (secondsOf (shot), cand, snapped) == 0, "1.5 s one-shot: bars 0");
+    }
+    {
+        std::vector<float> track = sig::clickTrack (120.f, 4, R);
+        track.resize ((size_t) sig::len (3.7f * 2.f, R));   // 3.7 bars of 2 s
+        float conf = 0.f, snapped = 0.f;
+        std::vector<float> cand;
+        analysis::tempo (fluxOf (track), conf, &cand);
+        const int bars = analysis::loopSnap (secondsOf (track), cand, snapped);
+        check (bars == 0, "120 BPM trimmed to 3.7 bars: not a loop (bars 0)", bars);
+        check (near (snapped, 120.0, 2.0), "120 BPM trimmed to 3.7 bars: tempo 120 +- 2", snapped);
+    }
+    {
+        // the x1/3 and x3 variants are in the list; list order (best score first) decides among snapping candidates
+        const std::vector<float> track = sig::clickTrack (120.f, 4, R);
+        float conf = 0.f, snapped = 0.f;
+        std::vector<float> cand;
+        analysis::tempo (fluxOf (track), conf, &cand);
+        auto has = [&] (float bpm) {
+            return std::any_of (cand.begin(), cand.end(), [&] (float c) { return near (c, bpm, 0.5); });
+        };
+        check (! cand.empty() && near (cand[0], 120.0, 0.5), "120 BPM 4 bars: candidates[0] = 120 +- 0.5", cand.empty() ? 0 : cand[0]);
+        check (has (40.f) && has (360.f), "120 BPM 4 bars: candidates hold x1/3 (40) and x3 (360)", (double) cand.size());
+        const float seconds = secondsOf (track);
+        int bars = analysis::loopSnap (seconds, { 40.f, 120.f, 360.f }, snapped);
+        check (bars == 4 && near (snapped, 120.0, 0.05), "loopSnap 8 s {40, 120, 360}: 40 no snap, 120 -> 4 bars @ 120", snapped);
+        bars = analysis::loopSnap (seconds, { 360.f, 120.f }, snapped);
+        check (bars == 12 && near (snapped, 360.0, 0.05), "loopSnap 8 s {360, 120}: list order -> 12 bars @ 360", snapped);
+    }
+    // a file longer than 16 bars at its tempo is no loop
+    for (int barsIn : { 24, 32, 64 })
+    {
+        const std::vector<float> track = sig::clickTrack (120.f, barsIn, R);
+        float conf = 0.f, snapped = 0.f;
+        std::vector<float> cand;
+        const float t = analysis::tempo (fluxOf (track), conf, &cand);
+        const int bars = analysis::loopSnap (secondsOf (track), cand, snapped);
+        std::printf ("     clicks 120 BPM, %d bars: tempo() %.3f\n", barsIn, t);
+        char what[96];
+        std::snprintf (what, sizeof what, "clicks 120 BPM, %d bars: not a loop (bars 0)", barsIn);
+        check (bars == 0, what, bars);
+        std::snprintf (what, sizeof what, "clicks 120 BPM, %d bars: tempo 120 +- 1", barsIn);
+        check (near (snapped, 120.0, 1.0), what, snapped);
+    }
+    // octave ambiguity is accepted: 174 may read 87, but a snapped loop's tempo always matches its length
+    for (int barsIn : { 8, 32 })
+    {
+        const std::vector<float> track = sig::clickTrack (174.f, barsIn, R);
+        float conf = 0.f, snapped = 0.f;
+        std::vector<float> cand;
+        analysis::tempo (fluxOf (track), conf, &cand);
+        const float seconds = secondsOf (track);
+        const int bars = analysis::loopSnap (seconds, cand, snapped);
+        std::printf ("     clicks 174 BPM, %d bars: tempo %.3f, bars %d\n", barsIn, snapped, bars);
+        char what[96];
+        std::snprintf (what, sizeof what, "clicks 174 BPM, %d bars: tempo 174 or 87 +- 1", barsIn);
+        check (near (snapped, 174.0, 1.0) || near (snapped, 87.0, 1.0), what, snapped);
+    }
+    // loopSnap edges
+    {
+        float snapped = -1.f;
+        int bars = analysis::loopSnap (8.f, std::vector<float>(), snapped);
+        check (bars == 0 && snapped == 0.f, "loopSnap: no candidates -> 0 bars, tempo 0", snapped);
+        bars = analysis::loopSnap (0.f, { 120.f, 60.f }, snapped);
+        check (bars == 0 && snapped == 120.f, "loopSnap: seconds 0 -> 0 bars, first candidate", snapped);
+        bars = analysis::loopSnap (-1.f, { 120.f }, snapped);
+        check (bars == 0 && snapped == 120.f, "loopSnap: seconds < 0 -> 0 bars, first candidate", snapped);
+        bars = analysis::loopSnap (7.4f, { 120.f, 60.f, 240.f }, snapped);
+        check (bars == 0 && snapped == 120.f, "loopSnap: nothing snaps -> 0 bars, first candidate", snapped);
+        float conf = -1.f;
+        std::vector<float> cand (2, 1.f);
+        const float t = analysis::tempo (std::vector<float> (500, 3.f), conf, &cand);
+        check (t == 0.f && conf == 0.f && cand.empty(), "tempo: constant flux -> 0, conf 0, no candidates", t);
+    }
+    {
+        float conf = 1.f;
+        analysis::tempo (fluxOf (sig::whiteNoise (4.f, R, 3)), conf);
+        check (conf <= 0.3f, "white noise 4 s: tempoConf <= 0.3", conf);
+    }
+    {
+        float conf = -1.f;
+        std::vector<float> cand (3, 1.f);
+        const float a = analysis::tempo (std::vector<float>(), conf, &cand);
+        check (a == 0.f && conf == 0.f && cand.empty(), "tempo: empty flux -> 0, conf 0, no candidates", a);
+        const float b = analysis::tempo (std::vector<float> (10, 1.f), conf, &cand);
+        check (b == 0.f && conf == 0.f && cand.empty(), "tempo: 10-frame flux -> 0, conf 0, no candidates", b);
+    }
+    {
+        struct Case { const char* name; bool found; float bpm; };
+        const Case cases[] = { { "Drum_Loop_120bpm.wav", true, 120.f }, { "bass 90 BPM Cmin.wav", true, 90.f },
+                               { "loop-128-bpm.wav", true, 128.f },     { "x_140_bpm.wav", true, 140.f },
+                               { "song2024.wav", false, 0.f },          { "kick.wav", false, 0.f },
+                               { "1000bpm.wav", false, 0.f },           { "20bpm.wav", false, 0.f } };
+        for (const Case& c : cases)
+        {
+            float bpm = 0.f;
+            const bool found = analysis::tempoTag (c.name, bpm);
+            char what[96];
+            std::snprintf (what, sizeof what, "tempoTag \"%s\" -> %s", c.name, c.found ? "tag" : "no tag");
+            check (found == c.found && (! found || bpm == c.bpm), what, bpm);
+        }
+    }
+}
+
+// key (chroma + Temperley / Krumhansl profiles), key tags, role scores and the whole analyse() pipeline
+inline void testKey()
+{
+    using namespace recycler;
+    const int R = analysis::RATE;
+    std::printf ("-- key, roles, analyse\n");
+    auto keyOf = [] (const std::vector<float>& mono, int& k, bool& minor, float& conf, const float (*profiles)[12]) {
+        const analysis::Frames f = analysis::frames (mono);
+        float best = 0.f;
+        const std::vector<float> on = analysis::onsets (analysis::odf (f), mono, best);
+        const analysis::Features ft = analysis::features (f, on, (float) mono.size() / (float) analysis::RATE);
+        analysis::key (f, ft.flatness, k, minor, conf, profiles);
+    };
+
+    // arpeggios in all 24 keys
+    {
+        int right[2] = { 0, 0 };
+        float worstConf = 1.f;
+        for (int t = 0; t < 2; ++t)
+            for (int root = 0; root < 12; ++root)
+                for (bool minor : { false, true })
+                {
+                    int k = -2;
+                    bool m = ! minor;
+                    float conf = 0.f;
+                    keyOf (sig::arpeggio (60 + root, minor, 3.f, R), k, m, conf, t == 0 ? analysis::TEMPERLEY : analysis::KRUMHANSL);
+                    if (k == root && m == minor)
+                    {
+                        ++right[t];
+                        if (t == 0) worstConf = std::min (worstConf, conf);
+                    }
+                }
+        std::printf ("     24-key arpeggios: Temperley %d / 24, Krumhansl-Kessler %d / 24\n", right[0], right[1]);
+        check (right[0] >= 22, "arpeggios, 24 keys, Temperley: >= 22 right (key and mode)", right[0]);
+        check (worstConf > 0.3f, "arpeggios, Temperley: keyConf > 0.3 on every right answer (lowest)", worstConf);
+    }
+    {
+        int k = -2;
+        bool m = false;
+        float conf = 0.f;
+        keyOf (sig::pad (60, true, 4.f, R), k, m, conf, analysis::TEMPERLEY);
+        check (k == 0 && m, "pad C minor: key 0 minor", k);
+        keyOf (sig::pad (57, false, 4.f, R), k, m, conf, analysis::TEMPERLEY);
+        check (k == 9 && ! m, "pad A major: key 9 major", k);
+        keyOf (sig::whiteNoise (4.f, R, 3), k, m, conf, analysis::TEMPERLEY);
+        check (k == -1, "white noise: key -1", k);
+        keyOf (sig::bassLine (48, 8.f, R), k, m, conf, analysis::TEMPERLEY);
+        check (k == 0, "bassLine root C: key 0", k);
+    }
+
+    // role ordering through the real pipeline
+    {
+        const char* names[4] = { "drums", "bass", "melody", "texture" };
+        struct Case { const char* name; std::vector<float> mono; int want; };
+        const Case cases[] = { { "noiseBursts 4/s", sig::noiseBursts (4.f, 4.f, R, 5), DRUMS },
+                               { "bassLine C", sig::bassLine (48, 8.f, R), BASS },
+                               { "melody A", sig::melody (69, 8.f, R), MELODY },
+                               { "pad A minor 10 s", sig::pad (57, true, 10.f, R), TEXTURE } };
+        for (const Case& c : cases)
+        {
+            const Info info = analysis::analyse (c.mono, R, 60.f);
+            int best = 0;
+            for (int r = 1; r < 4; ++r) if (info.role[r] > info.role[best]) best = r;
+            std::printf ("     roles %-18s drums %.3f  bass %.3f  melody %.3f  texture %.3f\n", c.name, info.role[0], info.role[1],
+                         info.role[2], info.role[3]);
+            char what[96];
+            std::snprintf (what, sizeof what, "roles: %s -> %s highest", c.name, names[c.want]);
+            check (best == c.want, what, best);
+        }
+    }
+
+    // key tags
+    {
+        struct Case { const char* name; bool found; int key; bool minor; };
+        const Case cases[] = { { "bass 90 BPM Cmin.wav", true, 0, true },  { "pad F#maj.wav", true, 6, false },
+                               { "lead_Am_loop.wav", true, 9, true },      { "Dbmajor chords.wav", true, 1, false },
+                               { "Bb min pad.wav", true, 10, true },       { "A minor.wav", true, 9, true },
+                               { "Amen_break.wav", false, 0, false },      { "Drums.wav", false, 0, false },
+                               { "C.wav", false, 0, false },               { "cmin.wav", false, 0, false },
+                               { "Am.wav", true, 9, true },                { "AM.wav", false, 0, false },
+                               { "A m.wav", false, 0, false },             { "DM me.wav", false, 0, false },
+                               { "Recorded 10 AM.wav", false, 0, false } };
+        for (const Case& c : cases)
+        {
+            int k = -1;
+            bool m = false;
+            const bool found = analysis::keyTag (c.name, k, m);
+            char what[96];
+            std::snprintf (what, sizeof what, "keyTag \"%s\" -> %s", c.name, c.found ? "tag" : "no tag");
+            check (found == c.found && (! found || (k == c.key && m == c.minor)), what, k);
+        }
+    }
+
+    // analyse(): the whole pipeline
+    {
+        const std::vector<float> clicks = sig::clickTrack (120.f, 4, 44100);
+        const Info a = analysis::analyse (clicks, 44100, 60.f);
+        check (near (a.tempo, 120.0, 0.05), "analyse clicks 120 @ 44.1 kHz: tempo 120 +- 0.05", a.tempo);
+        check (a.bars == 4, "analyse clicks 120 @ 44.1 kHz: 4 bars", a.bars);
+        check (a.onsets.size() == 16, "analyse clicks 120 @ 44.1 kHz: 16 onsets", (double) a.onsets.size());
+        double dc = 0, ss = 0;   // reference rms of the DC-removed input; 16 sparse 5 ms clicks in 8 s sit near -36 dBFS
+        for (float v : clicks) dc += v;
+        dc /= (double) clicks.size();
+        for (float v : clicks) ss += (v - dc) * (v - dc);
+        const double ref = 20.0 * std::log10 (std::sqrt (ss / (double) clicks.size()));
+        check (near (a.rms, ref, 0.01), "analyse clicks 120 @ 44.1 kHz: rms = DC-removed input rms +- 0.01 dB (dBFS)", a.rms);
+        check (a.peak <= 0.f, "analyse clicks 120 @ 44.1 kHz: peak <= 0 dBFS", a.peak);
+        check (a.seconds == 8.f && a.frames == (int64_t) clicks.size() && a.sampleRate == 44100,
+               "analyse clicks 120 @ 44.1 kHz: seconds 8, frames = input length, sampleRate 44100", a.seconds);
+
+        const Info t = analysis::analyse (clicks, 44100, 60.f, "loop 60bpm.wav");
+        check (t.tempo == 60.f, "analyse clicks 120, \"loop 60bpm.wav\": tag wins, tempo 60", t.tempo);
+        check (t.bars == 2, "analyse clicks 120, \"loop 60bpm.wav\": 2 bars", t.bars);
+        check (t.tempoConf == 1.f, "analyse clicks 120, \"loop 60bpm.wav\": tempoConf 1", t.tempoConf);
+    }
+    {
+        const Info n = analysis::analyse (sig::whiteNoise (4.f, R, 3), R, 60.f, "noise Cmin.wav");
+        check (n.key == 0 && n.minor, "analyse noise, \"noise Cmin.wav\": key 0 minor from the tag", n.key);
+        check (n.keyConf == 0.6f, "analyse noise, \"noise Cmin.wav\": keyConf 0.6", n.keyConf);
+    }
+    {
+        const std::vector<float> long90 = sig::pad (57, true, 90.f, R);
+        const Info p = analysis::analyse (long90, R, 30.f);
+        check (p.seconds == 90.f && p.frames == (int64_t) long90.size(), "analyse 90 s pad, cap 30: seconds 90, full frames", p.seconds);
+        check (std::all_of (p.onsets.begin(), p.onsets.end(), [] (float s) { return s <= 30.f; }), "analyse 90 s pad, cap 30: no onset past 30 s");
+        bool finite = std::isfinite (p.tempo) && std::isfinite (p.tempoConf) && std::isfinite (p.keyConf) && std::isfinite (p.rms)
+                      && std::isfinite (p.peak) && std::isfinite (p.bestOnset);
+        for (float r : p.role) finite = finite && std::isfinite (r);
+        check (finite, "analyse 90 s pad, cap 30: every field finite");
+    }
+    {
+        const Info s = analysis::analyse (std::vector<float> (R, 0.f), R, 60.f);
+        check (s.tempo == 0.f, "analyse 1 s silence: tempo 0", s.tempo);
+        check (s.key == -1, "analyse 1 s silence: key -1", s.key);
+        bool finite = true, zero = true;
+        for (float r : s.role) { finite = finite && std::isfinite (r); zero = zero && r == 0.f; }
+        check (finite, "analyse 1 s silence: all roles finite");
+        check (zero, "analyse 1 s silence: all four roles 0", s.role[TEXTURE]);
+        const Info e = analysis::analyse (std::vector<float>(), R, 60.f);
+        check (e.role[0] == 0.f && e.role[1] == 0.f && e.role[2] == 0.f && e.role[3] == 0.f, "analyse empty input: all four roles 0");
+    }
+    {
+        std::vector<float> three (sig::len (2.5f, R), 0.f);
+        sig::Rng rng (2);
+        for (int i = 0; i < 3; ++i) sig::burst (three, sig::len (0.5f * i, R), R, 5.f, 1.f, 0.8f, rng);
+        const Info c = analysis::analyse (three, R, 60.f);
+        check (c.onsets.size() == 3, "analyse 3 clicks in 2.5 s: 3 onsets", (double) c.onsets.size());
+        check (c.tempo == 0.f && c.bars == 0, "analyse 3 clicks in 2.5 s: under 4 onsets -> tempo 0, bars 0", c.tempo);
+    }
+    {
+        // a tempo tag wins over the 2 s and 4-onset gates
+        std::vector<float> kick (sig::len (1.5f, R), 0.f);
+        sig::Rng rng (3);
+        sig::burst (kick, 0, R, 5.f, 1.f, 0.8f, rng);
+        const Info k = analysis::analyse (kick, R, 60.f, "kick 120bpm.wav");
+        check (k.tempo == 120.f && k.tempoConf == 1.f, "analyse 1.5 s \"kick 120bpm.wav\": tag wins, tempo 120, conf 1", k.tempo);
+        check (k.bars == 0, "analyse 1.5 s \"kick 120bpm.wav\": bars 0 (0.75 bar is no loop)", k.bars);
+    }
+}
 
 inline void testAnalysis()
 {
@@ -200,4 +523,6 @@ inline void testAnalysis()
         check (bursts.sustain < 0.3f, "noiseBursts 4/s: sustain < 0.3", bursts.sustain);
         check (bursts.onsetDensity == 4.f, "noiseBursts 4/s: onsetDensity == 4", bursts.onsetDensity);
     }
+    testTempo();
+    testKey();
 }
