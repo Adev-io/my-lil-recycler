@@ -120,7 +120,8 @@ inline float score (const Info& i, int role, const Target& t, const History& h, 
 }
 
 // one slot: never currentFile nor any otherFiles entry (-1 = none). Candidates have role[j] >= lerp(0.6, 0, chaos); with none
-// scoring > 0, the five best role[j] files. Draw p ~ score^(1 / tau) over the top 16, tau = lerp(0.15, 1, chaos). -1 when empty.
+// scoring > 0, the five best role[j] files among those with role[j] >= lerp(0.3, 0, chaos), so a file of the wrong kind never
+// fills the slot. Draw p ~ score^(1 / tau) over the top 16, tau = lerp(0.15, 1, chaos). -1 when empty (the caller keeps its file).
 inline Choice pickOne (const library::Library& lib, int role, const Target& t, int currentFile, const int otherFiles[4], const History& h, Rng& rng)
 {
     const float c = detail::chaosOf (t);
@@ -140,11 +141,12 @@ inline Choice pickOne (const library::Library& lib, int role, const Target& t, i
         if (sc > 0.f) pool.push_back (std::make_pair (sc, i));
     }
 
-    if (pool.empty())    // fall back to the five best role[j] files
+    if (pool.empty())    // fall back to the five best role[j] files that are still of the right kind
     {
+        const float minRole = detail::lerp (0.3f, 0.f, c);
         std::vector<std::pair<float, int> > best;
         for (int i = 0; i < n; ++i)
-            if (! taken (i) && detail::usable (lib.files[i], role)) best.push_back (std::make_pair (lib.files[i].role[role], i));
+            if (! taken (i) && lib.files[i].role[role] >= minRole && detail::usable (lib.files[i], role)) best.push_back (std::make_pair (lib.files[i].role[role], i));
         const size_t five = std::min<size_t> (5, best.size());
         std::partial_sort (best.begin(), best.begin() + five, best.end(), detail::better);
         for (size_t b = 0; b < five; ++b)
@@ -181,6 +183,7 @@ inline Choice pickOne (const library::Library& lib, int role, const Target& t, i
 
 // picks every unlocked slot in role order with one rng. Each slot's current file is excluded from its re-roll, and no file
 // appears twice in the combo: each pick avoids the locked slots' files and the files already picked in this call.
+// A slot whose pick comes back -1 keeps its current Choice (that file keeps playing), and later slots avoid that file too.
 inline void pickAll (const library::Library& lib, const Target& t, const bool locked[4], Choice slots[4], History& h, Rng& rng)
 {
     int taken[4];
@@ -188,9 +191,9 @@ inline void pickAll (const library::Library& lib, const Target& t, const bool lo
     for (int j = 0; j < 4; ++j)
     {
         if (locked[j]) continue;
-        slots[j] = pickOne (lib, j, t, slots[j].file, taken, h, rng);
+        const Choice c = pickOne (lib, j, t, slots[j].file, taken, h, rng);
+        if (c.file >= 0) { slots[j] = c; h.push (j, c.file); }
         taken[j] = slots[j].file;
-        if (slots[j].file >= 0) h.push (j, slots[j].file);
     }
 }
 

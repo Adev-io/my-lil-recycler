@@ -331,6 +331,44 @@ inline void testPicker()
         check (pickOne (weak, recycler::BASS, target (0.f), -1, none, h, rng).file == 0, "picker: below-threshold falls back to best role files");
     }
 
+    // fallback floor lerp(0.3, 0, chaos): with the only real drum file current, no wrong-kind file fills the drums slot
+    {
+        recycler::library::Library sm = smoke();                  // drum loop 6 is the only strong drums file
+        sm.files[0].role[recycler::DRUMS] = 0.2f;                 // best other drums score, under the 0.225 floor at chaos 0.25
+        History h; int filled = 0, any = 0;
+        for (uint64_t seed = 1; seed <= 50; ++seed)
+        {
+            Rng a (seed), b (seed);
+            if (pickOne (sm, recycler::DRUMS, cMinor (0.25f), 6, none, h, a).file >= 0) ++filled;
+            if (pickOne (sm, recycler::DRUMS, cMinor (1.f), 6, none, h, b).file >= 0) ++any;
+        }
+        check (filled == 0, "picker: chaos 0.25, drums 0.2 under the fallback floor -> -1 (count filled of 50)", filled);
+        check (any == 50, "picker: chaos 1 -> drums re-roll still returns a file (count of 50)", any);
+        sm.files[0].role[recycler::DRUMS] = 0.26f;                // over the 0.225 floor: the fallback may take it
+        Rng r (1);
+        check (pickOne (sm, recycler::DRUMS, cMinor (0.25f), 6, none, h, r).file == 0, "picker: chaos 0.25, drums 0.26 is over the floor -> fallback takes it");
+    }
+
+    // pickAll: a slot whose re-roll comes back -1 keeps its file, and later slots cannot take it
+    {
+        recycler::library::Library two;
+        Info a; a.tempo = 120.f; a.key = 0; a.role[recycler::BASS] = 0.9f; a.role[recycler::MELODY] = 0.9f;   // the only bass file
+        Info b = a; b.role[recycler::BASS] = 0.1f; b.role[recycler::MELODY] = 0.7f;
+        two.files.push_back (a); two.files.push_back (b);
+        const bool locked[4] = { false, false, false, false };
+        int stolen = 0, kept = 0;
+        for (uint64_t seed = 1; seed <= 200; ++seed)
+        {
+            Choice slots[4]; slots[recycler::BASS].file = 0; slots[recycler::BASS].k = 0; slots[recycler::BASS].s = 2;
+            History h; Rng r (seed);
+            pickAll (two, target (0.25f), locked, slots, h, r);
+            if (slots[recycler::BASS].file == 0 && slots[recycler::BASS].s == 2 && ! h.seen (recycler::BASS, 0)) ++kept;
+            if (slots[recycler::MELODY].file == 0 || slots[recycler::DRUMS].file == 0 || slots[recycler::TEXTURE].file == 0) ++stolen;
+        }
+        check (kept == 200, "picker: pickAll keeps a slot's Choice when its re-roll returns -1 (count of 200)", kept);
+        check (stolen == 0, "picker: that kept file is not picked by a later slot (count of 200)", stolen);
+    }
+
     // empty library
     {
         recycler::library::Library empty;
