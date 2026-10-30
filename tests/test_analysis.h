@@ -223,21 +223,28 @@ inline void testKey()
     // role ordering through the real pipeline
     {
         const char* names[4] = { "drums", "bass", "melody", "texture" };
-        struct Case { const char* name; std::vector<float> mono; int want; };
-        const Case cases[] = { { "noiseBursts 4/s", sig::noiseBursts (4.f, 4.f, R, 5), DRUMS },
-                               { "bassLine C", sig::bassLine (48, 8.f, R), BASS },
-                               { "melody A", sig::melody (69, 8.f, R), MELODY },
-                               { "pad A minor 10 s", sig::pad (57, true, 10.f, R), TEXTURE } };
+        struct Case { const char* name; std::vector<float> mono; int want; float atLeast; };   // atLeast 0 = no floor check
+        const Case cases[] = { { "noiseBursts 4/s", sig::noiseBursts (4.f, 4.f, R, 5), DRUMS, 0.f },
+                               { "bassLine C", sig::bassLine (48, 8.f, R), BASS, 0.f },
+                               { "melody A", sig::melody (69, 8.f, R), MELODY, 0.f },
+                               { "pad A minor 10 s", sig::pad (57, true, 10.f, R), TEXTURE, 0.f },
+                               { "drumLoop 120, 2 bars", sig::drumLoop (120.f, 2, R), DRUMS, 0.55f },
+                               { "kick+snare 90, 2 bars", sig::drumLoop (90.f, 2, R, false), DRUMS, 0.35f } };
         for (const Case& c : cases)
         {
             const Info info = analysis::analyse (c.mono, R, 60.f);
             int best = 0;
             for (int r = 1; r < 4; ++r) if (info.role[r] > info.role[best]) best = r;
-            std::printf ("     roles %-18s drums %.3f  bass %.3f  melody %.3f  texture %.3f\n", c.name, info.role[0], info.role[1],
-                         info.role[2], info.role[3]);
+            std::printf ("     roles %-20s drums %.3f  bass %.3f  melody %.3f  texture %.3f  (key %d, keyConf %.2f)\n", c.name,
+                         info.role[0], info.role[1], info.role[2], info.role[3], info.key, info.keyConf);
             char what[96];
             std::snprintf (what, sizeof what, "roles: %s -> %s highest", c.name, names[c.want]);
             check (best == c.want, what, best);
+            if (c.atLeast > 0.f)
+            {
+                std::snprintf (what, sizeof what, "roles: %s -> %s >= %.2f", c.name, names[c.want], c.atLeast);
+                check (info.role[c.want] >= c.atLeast, what, info.role[c.want]);
+            }
         }
     }
 

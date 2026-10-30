@@ -506,12 +506,22 @@ inline bool keyTag (const std::string& fileName, int& key, bool& minor)
     return false;
 }
 
-// Step 6, role scores from the five features; s(x) = 1 / (1 + e^-x), t = tonalness. Not normalised across roles.
+// Step 6 tonalness for the role formulas: keyConf (a raw correlation) mapped so r 0.35 -> 0 and r 0.75 -> 1, clamped;
+// 0 when atonal. A drum loop's tonal kick correlates ~0.4 with some key; unmapped, that would halve its drums score.
+constexpr double TONAL_FROM = 0.35, TONAL_SPAN = 0.4;
+inline float tonalness (int key, float keyConf)
+{
+    return key < 0 ? 0.f : (float) std::max (0.0, std::min (1.0, (keyConf - TONAL_FROM) / TONAL_SPAN));
+}
+
+// Step 6, role scores from the five features; s(x) = 1 / (1 + e^-x), t = tonalness. Not normalised across roles. The
+// drums curve is centred at 1.5 onsets/s: 8th-note hats at 100 BPM (3.3/s) give 0.97 x (1 - t), a kick + snare beat on
+// quarters at 90 BPM (1.5/s) 0.5 x (1 - t).
 inline void roles (const Features& ft, float role[4])
 {
     auto s = [] (double x) { return 1.0 / (1.0 + std::exp (-x)); };
     const double d = ft.onsetDensity, t = ft.tonalness, b = ft.lowShare, c = ft.centroid, u = ft.sustain;
-    role[DRUMS] = (float) (s (d - 3) * (1 - t));
+    role[DRUMS] = (float) (s (2 * (d - 1.5)) * (1 - t));
     role[BASS] = (float) (t * s (10 * (b - 0.35)) * (c < 400 ? 1.0 : 0.2));
     role[MELODY] = (float) (t * (1 - b) * (c >= 300 && c <= 4000 ? 1.0 : 0.3) * s (d - 0.5));
     role[TEXTURE] = (float) (u * (1 - s (d - 2)) * 0.5 + (1 - t) * (1 - s (d - 1)) * 0.5);
@@ -521,7 +531,7 @@ inline void roles (const Features& ft, float role[4])
 // removed (mean of that span), resampled to RATE and analysed: onsets, features, tempo, key and roles. A tempo tag in
 // fileName replaces the candidates with the one within 2 % of it (else the tag value) at conf 1; loopSnap then uses the
 // FULL length as the clock. Under 4 onsets with no tag: tempo, bars, conf 0. A key tag replaces a detected key with
-// keyConf < 0.5 and sets keyConf 0.6. tonalness = keyConf (0 when atonal). rms and peak are dBFS over the analysed span
+// keyConf < 0.5 and sets keyConf 0.6. Features::tonalness = tonalness(key, keyConf). rms and peak are dBFS over the analysed span
 // (-99 for silence). Empty input or a silent span (rms -99) leaves all four roles 0. seconds, frames and sampleRate
 // describe the full input; path, size and mtime are the caller's.
 inline Info analyse (const std::vector<float>& mono, int sampleRate, float capSeconds, const std::string& fileName = "")
@@ -580,7 +590,7 @@ inline Info analyse (const std::vector<float>& mono, int sampleRate, float capSe
         info.minor = tagMinor;
         info.keyConf = TAG_KEY_CONF;
     }
-    ft.tonalness = info.key >= 0 ? info.keyConf : 0.f;
+    ft.tonalness = tonalness (info.key, info.keyConf);
     if (info.rms > -99.f) roles (ft, info.role);   // a silent span plays no role
     return info;
 }

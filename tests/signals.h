@@ -174,4 +174,34 @@ inline std::vector<float> melody (int rootMidi, float seconds, int rate)
     }
     return out;
 }
+
+// 4/4 drum loop: kick on beats 1 and 3 (a 250 ms sine sweeping 110 -> 55 Hz, 80 ms decay, peak 0.8), snare on 2 and 4
+// (120 ms noise burst, 30 ms decay, peak 0.5), hats on every 8th unless `hats` is false (30 ms noise burst, 4 ms decay,
+// peak 0.2)
+inline std::vector<float> drumLoop (float bpm, int bars, int rate, bool hats = true)
+{
+    const double beat = 60.0 / bpm;
+    std::vector<float> out (len ((float) (beat * 4 * bars), rate), 0.f);
+    Rng rng (9);
+    const int kickLen = len (0.25f, rate);
+    for (int b = 0; b < 4 * bars; ++b)
+    {
+        const int at = (int) std::lround (b * beat * rate);
+        if (b % 2 == 0)
+        {
+            double phase = 0;
+            for (int i = 0; i < kickLen && at + i < (int) out.size(); ++i)
+            {
+                out[at + i] += 0.8f * std::exp (-(float) i / (0.08f * rate)) * (float) std::sin (2.0 * PI * phase);
+                phase += 110.0 * std::pow (0.5, (double) i / kickLen) / rate;
+            }
+        }
+        else
+            burst (out, at, rate, 120.f, 30.f, 0.5f, rng);
+        if (! hats) continue;
+        burst (out, at, rate, 30.f, 4.f, 0.2f, rng);
+        burst (out, (int) std::lround ((b + 0.5) * beat * rate), rate, 30.f, 4.f, 0.2f, rng);
+    }
+    return out;
+}
 } // namespace sig
