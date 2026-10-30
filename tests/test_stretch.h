@@ -461,4 +461,73 @@ inline void testStretch()
         const double d = N == 240000 ? winDb (N - f - w) - winDb (N / 2) : -99.0;
         check (std::fabs (d) <= 1.0, "r = 2.5 tail: last 25 ms within 1 dB of the middle (dB)", d);
     }
+
+    // octave k: a 4-bar 120 BPM click loop (16 clicks 0.5 s apart, 8 s) analysed as "2 bars @ 60"; the effective tempo is 60 * 2^k
+    {
+        const Stereo a = stereo (sig::clickTrack (120.f, 4, sr));
+        const auto loopInfo = [&] (float tempo, int bars)
+        {
+            recycler::Info i;
+            i.tempo = tempo; i.bars = bars; i.frames = (int64_t) a.frames();
+            for (int c = 0; c < 16; ++c) i.onsets.push_back (0.5f * c);
+            return i;
+        };
+        const auto renderK = [&] (const recycler::Info& info, int k, float bpm)
+        {
+            st::RenderIn in;
+            in.audio = &a; in.fileRate = sr; in.info = &info; in.role = recycler::DRUMS;
+            in.choice.k = k; in.target = target (bpm, 4); in.outRate = sr;
+            return st::render (in);
+        };
+        // every click past the 5 ms fade-in sits on the 0.5 s grid (+- 1 ms), and every grid point has one
+        const auto grid = [&] (const Stereo& y, const char* what)
+        {
+            std::vector<size_t> c = clicks (y.l, sr);
+            c.erase (std::remove_if (c.begin(), c.end(), [&] (size_t v) { return v < (size_t) fadeLen; }), c.end());
+            const size_t want = (y.frames() - 1) / (sr / 2);   // grid points 0.5 j s, j >= 1, inside the buffer
+            double err = c.size() == want ? 0.0 : 1.0;
+            for (size_t j = 0; j < c.size() && j < want; ++j) err = std::max (err, std::fabs ((double) c[j] / sr - 0.5 * (j + 1)));
+            check (err <= 0.001, what, err);
+        };
+        const auto diff = [] (const Stereo& p, const Stereo& q) -> double
+        {
+            if (p.frames() != q.frames() || p.frames() == 0) return 1.0;
+            double d = 0;
+            for (size_t i = 0; i < p.frames(); ++i)
+                d = std::max (d, (double) std::max (std::fabs (p.l[i] - q.l[i]), std::fabs (p.r[i] - q.r[i])));
+            return d;
+        };
+
+        const recycler::Info half = loopInfo (60.f, 2);
+        const Stereo up = renderK (half, 1, 120.f);
+        check (up.frames() == 384000, "k=+1, '2 bars @ 60' into 4 bars at 120: N frames", (double) up.frames());
+        grid (up, "k=+1: clicks at 0.5 i s +- 1 ms (not 0.25 i), 15 after the fade-in");
+        const double du = diff (up, renderK (loopInfo (120.f, 4), 0, 120.f));
+        check (du <= 1e-6, "k=+1 render == the same audio as '4 bars @ 120', k=0", du);
+
+        // k = -1 against 30 BPM: effective tempo 30, the 8 s file is 1 effective bar, tiled to 4 (r = 1)
+        const Stereo down = renderK (half, -1, 30.f);
+        check (down.frames() == st::framesFor (30.f, 4, sr), "k=-1 into 4 bars at 30: N frames (32 s)", (double) down.frames());
+        grid (down, "k=-1: clicks at 0.5 i s +- 1 ms through 4 tiles of the whole file");
+        const double dd = diff (down, renderK (loopInfo (30.f, 1), 0, 30.f));
+        check (dd <= 1e-6, "k=-1 render == the same audio as '1 bar @ 30', k=0", dd);
+
+        // non-loop: tempo 60, k=+1, 4 bars at 120 -> 8 s (+ 1 s), not 16 s; the pitch is untouched
+        const Stereo saw = stereo (sig::saw (110.f, 20.f, sr));
+        recycler::Info info;
+        info.tempo = 60.f; info.onsets.push_back (0.f);
+        recycler::picker::Choice ch;
+        ch.k = 1;
+        const st::Region g1 = st::regionFor (info, recycler::BASS, ch, target (120.f, 4), sr);
+        check (g1.start == 0 && g1.frames == 9 * sr, "regionFor non-loop, tempo 60, k=+1: (8 s + 1 s) frames", (double) g1.frames);
+        ch.k = 0;
+        const st::Region g0 = st::regionFor (info, recycler::BASS, ch, target (120.f, 4), sr);
+        check (g0.frames == 17 * sr, "regionFor non-loop, tempo 60, k=0: (16 s + 1 s) frames", (double) g0.frames);
+        st::RenderIn in;
+        in.audio = &saw; in.fileRate = sr; in.info = &info; in.role = recycler::BASS;
+        in.choice.k = 1; in.target = target (120.f, 4); in.outRate = sr;
+        const Stereo y = st::render (in);
+        const double z = zcr (y.l, sr);
+        check (y.frames() == 384000 && std::fabs (z / 220.0 - 1.0) <= 0.02, "render non-loop k=+1: N frames, 220 crossings/s", z);
+    }
 }

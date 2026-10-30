@@ -36,6 +36,9 @@ inline float fadeGain (size_t m, size_t f) { return m >= f ? 1.f : (float) (0.5 
 inline size_t roundSize (double v) { return v > 0.0 ? (size_t) std::llround (v) : 0; }
 inline size_t hopFor (int sr) { return std::max<size_t> (1, roundSize (HOP_S * sr)); }
 
+// 2^k, the picker's octave: tempo is only known up to an octave, so the effective file tempo is tempo * 2^k
+inline double octave (int k) { return std::ldexp (1.0, std::max (-3, std::min (3, k))); }
+
 // WSOLA core: nUnit output frames span x[0, S); nOut frames are synthesised (past nUnit the mapping runs on into x[S, size),
 // the right-hand context, which the search and the last blocks read instead of zeros). Positions are block centres in x.
 inline std::vector<float> wsola (const std::vector<float>& x, size_t S, size_t nUnit, size_t nOut, int sr,
@@ -181,13 +184,14 @@ inline size_t framesFor (float bpm, int bars, int outRate)
 struct Region { int64_t start = 0, frames = 0; };   // in file frames at fileRate
 
 // What render needs decoded. Loops (info.bars > 0): the whole file, {0, info.frames} (INT64_MAX frames when info.frames is 0).
-// Non-loop with a tempo: from bestOnset snapped back to the nearest onset at or before it (0 if none), B bars at the file's
-// tempo (clamped to 30..400 BPM against a corrupt cache). Tempo 0: B bars of the target from bestOnset, at native speed. Both
-// plus a 1 s margin (render's right-hand context). The region may run past the end of the file: the caller clamps it to what
-// the file holds and render pads the rest with silence.
+// Non-loop with a tempo: from bestOnset snapped back to the nearest onset at or before it (0 if none), B bars at the effective
+// tempo info.tempo * 2^c.k (the tempo clamped to 30..400 BPM against a corrupt cache first): it depends on choice.k, which
+// resolves the analysis's octave ambiguity against the target. Tempo 0: B bars of the target from bestOnset, at native speed.
+// Both plus a 1 s margin (render's right-hand context). The region may run past the end of the file: the caller clamps it to
+// what the file holds and render pads the rest with silence. role and c.s do not change it (the pitch shift keeps the length).
 inline Region regionFor (const Info& info, int role, const picker::Choice& c, const picker::Target& t, int fileRate)
 {
-    (void) role; (void) c;   // the region does not depend on them (the pitch shift keeps the native length)
+    (void) role;
     Region g;
     if (info.bars > 0) { g.frames = info.frames > 0 ? info.frames : INT64_MAX; return g; }
     if (fileRate <= 0 || t.bars <= 0) return g;
@@ -199,7 +203,7 @@ inline Region regionFor (const Info& info, int role, const picker::Choice& c, co
         for (size_t i = 0; i < info.onsets.size(); ++i)
             if (info.onsets[i] <= at && info.onsets[i] > snap) snap = info.onsets[i];
         at = snap;
-        sec = t.bars * 4.0 * 60.0 / std::min (400.0, std::max (30.0, (double) info.tempo));
+        sec = t.bars * 4.0 * 60.0 / (std::min (400.0, std::max (30.0, (double) info.tempo)) * detail::octave (c.k));
     }
     else if (t.bpm > 0.f) sec = t.bars * 4.0 * 60.0 / t.bpm;
     g.start = std::max<int64_t> (0, std::llround (at * fileRate));
@@ -238,18 +242,20 @@ inline Stereo render (const RenderIn& in)
     bool circular = false;
     if (info.bars > 0)
     {
+        // the file in effective bars (at tempo * 2^k): B of them is the region; fewer tile, more are cut. Fractions are fine.
+        const double bars = (double) info.bars * detail::octave (in.choice.k);
         const int64_t whole = info.frames > 0 ? info.frames : a0 + (int64_t) F;
         span = whole;
         right = 0;
-        if (info.bars > t.bars)
+        if (bars > t.bars)
         {
-            span = std::llround ((double) whole * t.bars / info.bars);
+            span = std::llround ((double) whole * t.bars / bars);
             right = std::min<int64_t> (in.fileRate, whole - span);
         }
         else
         {
             circular = true;
-            if (info.bars < t.bars) unit = framesFor (t.bpm, info.bars, sr);
+            if (bars < t.bars) unit = detail::roundSize (bars * 4.0 * 60.0 / (double) t.bpm * (double) sr);
         }
     }
     if (span <= 0 || unit == 0) return silence();
