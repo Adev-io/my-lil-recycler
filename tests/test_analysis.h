@@ -229,7 +229,10 @@ inline void testKey()
                                { "melody A", sig::melody (69, 8.f, R), MELODY, 0.f },
                                { "pad A minor 10 s", sig::pad (57, true, 10.f, R), TEXTURE, 0.f },
                                { "drumLoop 120, 2 bars", sig::drumLoop (120.f, 2, R), DRUMS, 0.55f },
-                               { "kick+snare 90, 2 bars", sig::drumLoop (90.f, 2, R, false), DRUMS, 0.35f } };
+                               { "kick+snare 90, 2 bars", sig::drumLoop (90.f, 2, R, false), DRUMS, 0.35f },
+                               // pitched 55 Hz kicks make these read as keyed (keyConf ~0.7): drums must not hang on 1 - t
+                               { "drumLoop 90, 2 bars", sig::drumLoop (90.f, 2, R), DRUMS, 0.5f },
+                               { "drumLoop 100, 2 bars", sig::drumLoop (100.f, 2, R), DRUMS, 0.5f } };
         for (const Case& c : cases)
         {
             const Info info = analysis::analyse (c.mono, R, 60.f);

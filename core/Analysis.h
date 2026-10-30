@@ -514,14 +514,16 @@ inline float tonalness (int key, float keyConf)
     return key < 0 ? 0.f : (float) std::max (0.0, std::min (1.0, (keyConf - TONAL_FROM) / TONAL_SPAN));
 }
 
-// Step 6, role scores from the five features; s(x) = 1 / (1 + e^-x), t = tonalness. Not normalised across roles. The
-// drums curve is centred at 1.5 onsets/s: 8th-note hats at 100 BPM (3.3/s) give 0.97 x (1 - t), a kick + snare beat on
-// quarters at 90 BPM (1.5/s) 0.5 x (1 - t).
+// Step 6, role scores from the five features; s(x) = 1 / (1 + e^-x), t = tonalness. Not normalised across roles. Drums
+// = density (centred at 1.5 onsets/s: 8th-note hats at 100 BPM, 3.3/s, give 0.97) x percussiveness (1 - sustain, the
+// share of frames more than 20 dB under the loudest). Not (1 - t): a pitched 55 Hz kick makes a drum loop correlate
+// 0.65-0.75 with some key, and (1 - t) scored such loops 0.00-0.23. Sustain splits the fixtures cleanly (drums 0.15-0.23,
+// every bass, lead and pad >= 0.98).
 inline void roles (const Features& ft, float role[4])
 {
     auto s = [] (double x) { return 1.0 / (1.0 + std::exp (-x)); };
     const double d = ft.onsetDensity, t = ft.tonalness, b = ft.lowShare, c = ft.centroid, u = ft.sustain;
-    role[DRUMS] = (float) (s (2 * (d - 1.5)) * (1 - t));
+    role[DRUMS] = (float) (s (2 * (d - 1.5)) * (1 - u));
     role[BASS] = (float) (t * s (10 * (b - 0.35)) * (c < 400 ? 1.0 : 0.2));
     role[MELODY] = (float) (t * (1 - b) * (c >= 300 && c <= 4000 ? 1.0 : 0.3) * s (d - 0.5));
     role[TEXTURE] = (float) (u * (1 - s (d - 2)) * 0.5 + (1 - t) * (1 - s (d - 1)) * 0.5);

@@ -175,33 +175,55 @@ inline std::vector<float> melody (int rootMidi, float seconds, int rate)
     return out;
 }
 
-// 4/4 drum loop: kick on beats 1 and 3 (a 250 ms sine sweeping 110 -> 55 Hz, 80 ms decay, peak 0.8), snare on 2 and 4
-// (120 ms noise burst, 30 ms decay, peak 0.5), hats on every 8th unless `hats` is false (30 ms noise burst, 4 ms decay,
-// peak 0.2)
+// 4/4 drum loop built like tools/mkfixtures.py drums(): kick on beats 1 and 3 (120 ms sine, pitch 55 + 55 e^(-t / 25 ms)
+// Hz, so it sits on 55 Hz and reads as keyed; amplitude e^(-t / 45 ms)), snare on 2 and 4 (150 ms first-difference noise,
+// 40 ms decay), hats on every 8th unless `hats` is false (25 ms second-difference noise, 8 ms decay); scaled to peak 0.7
 inline std::vector<float> drumLoop (float bpm, int bars, int rate, bool hats = true)
 {
-    const double beat = 60.0 / bpm;
-    std::vector<float> out (len ((float) (beat * 4 * bars), rate), 0.f);
+    const double beat = 60.0 / bpm * rate;
+    std::vector<float> out (len ((float) (60.0 / bpm * 4 * bars), rate), 0.f);
+    const int n = (int) out.size();
     Rng rng (9);
-    const int kickLen = len (0.25f, rate);
     for (int b = 0; b < 4 * bars; ++b)
     {
-        const int at = (int) std::lround (b * beat * rate);
+        const int at = (int) std::lround (b * beat);
         if (b % 2 == 0)
         {
             double phase = 0;
-            for (int i = 0; i < kickLen && at + i < (int) out.size(); ++i)
+            for (int i = 0; i < len (0.12f, rate) && at + i < n; ++i)
             {
-                out[at + i] += 0.8f * std::exp (-(float) i / (0.08f * rate)) * (float) std::sin (2.0 * PI * phase);
-                phase += 110.0 * std::pow (0.5, (double) i / kickLen) / rate;
+                const double t = (double) i / rate;
+                phase += 2.0 * PI * (55.0 + 55.0 * std::exp (-t / 0.025)) / rate;
+                out[at + i] += (float) (std::sin (phase) * std::exp (-t / 0.045));
             }
         }
         else
-            burst (out, at, rate, 120.f, 30.f, 0.5f, rng);
-        if (! hats) continue;
-        burst (out, at, rate, 30.f, 4.f, 0.2f, rng);
-        burst (out, (int) std::lround ((b + 0.5) * beat * rate), rate, 30.f, 4.f, 0.2f, rng);
+        {
+            float prev = 0.f;
+            for (int i = 0; i < len (0.15f, rate) && at + i < n; ++i)
+            {
+                const float w = rng.uni();
+                out[at + i] += (w - prev) * 0.4f * (float) std::exp (-(double) i / rate / 0.04);
+                prev = w;
+            }
+        }
     }
+    for (int e = 0; hats && e < 8 * bars; ++e)
+    {
+        const int at = (int) std::lround (e * beat / 2);
+        float p1 = 0.f, p2 = 0.f;
+        for (int i = 0; i < len (0.025f, rate) && at + i < n; ++i)
+        {
+            const float w = rng.uni();
+            out[at + i] += (w - 2 * p1 + p2) * 0.125f * (float) std::exp (-(double) i / rate / 0.008);
+            p2 = p1;
+            p1 = w;
+        }
+    }
+    float peak = 0.f;
+    for (float v : out) peak = std::fmax (peak, std::fabs (v));
+    if (peak > 0.f)
+        for (float& v : out) v *= 0.7f / peak;
     return out;
 }
 } // namespace sig
