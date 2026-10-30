@@ -1,4 +1,5 @@
-// test_picker.h: octave and shift math, chaos bounds, locks, determinism, exclusion, fallback and history of Picker.h.
+// test_picker.h: octave and shift math, soft fits, the Rack smoke folder, chaos bounds, no duplicates, locks, determinism,
+// exclusion, fallback and history of Picker.h.
 // Author: Ari Klopfer / A_Development. MIT
 #pragma once
 #include "check.h"
@@ -10,6 +11,8 @@ namespace pickertest
 {
 using recycler::Info;
 using namespace recycler::picker;
+
+const int none[4] = { -1, -1, -1, -1 };
 
 // 40 files: 10 per role (n = role * 10 + i). i = 0 fits 120 BPM C major exactly; drums 0..3 atonal; texture 8, 9 tempo 0.
 inline recycler::library::Library fixture()
@@ -33,7 +36,31 @@ inline recycler::library::Library fixture()
     return lib;
 }
 
+// the Rack smoke folder: bass 0..2 and melody 3..5 in G minor / A major / F# minor at 100 / 120 / 140 BPM, roles 0.65 / 0.70 / 0.74;
+// 6 is an atonal 100 BPM drum loop with bass and melody 0.15. Against C minor 120 every tonal file needs |s| >= 5.
+inline recycler::library::Library smoke()
+{
+    static const int keys[3] = { 7, 9, 6 };
+    static const bool minors[3] = { true, false, true };
+    static const float tempos[3] = { 100.f, 120.f, 140.f }, roles[3] = { 0.65f, 0.70f, 0.74f };
+    recycler::library::Library lib;
+    for (int r = recycler::BASS; r <= recycler::MELODY; ++r)
+        for (int i = 0; i < 3; ++i)
+        {
+            Info f;
+            f.tempo = tempos[i]; f.key = keys[i]; f.minor = minors[i];
+            f.role[recycler::DRUMS] = 0.05f; f.role[recycler::BASS] = 0.2f; f.role[recycler::MELODY] = 0.2f; f.role[recycler::TEXTURE] = 0.1f;
+            f.role[r] = roles[i];
+            lib.files.push_back (f);
+        }
+    Info loop; loop.tempo = 100.f; loop.key = -1;
+    loop.role[recycler::DRUMS] = 0.9f; loop.role[recycler::BASS] = 0.15f; loop.role[recycler::MELODY] = 0.15f; loop.role[recycler::TEXTURE] = 0.1f;
+    lib.files.push_back (loop);
+    return lib;
+}
+
 inline Target target (float chaos) { Target t; t.bpm = 120.f; t.root = 0; t.minor = false; t.chaos = chaos; return t; }
+inline Target cMinor (float chaos) { Target t = target (chaos); t.minor = true; return t; }
 
 inline void pickAllSeed (const recycler::library::Library& lib, const Target& t, uint64_t seed, Choice slots[4])
 {
@@ -41,6 +68,14 @@ inline void pickAllSeed (const recycler::library::Library& lib, const Target& t,
     History h; Rng rng (seed);
     for (int j = 0; j < 4; ++j) slots[j] = Choice();
     pickAll (lib, t, locked, slots, h, rng);
+}
+
+inline bool distinct (const Choice slots[4])
+{
+    for (int a = 0; a < 4; ++a)
+        for (int b = a + 1; b < 4; ++b)
+            if (slots[a].file >= 0 && slots[a].file == slots[b].file) return false;
+    return true;
 }
 } // namespace pickertest
 
@@ -76,19 +111,68 @@ inline void testPicker()
             }
     check (wrapOk, "picker: shiftFor in -6..5 and lands on target for all 576 key/mode pairs");
 
-    // score exclusions
+    // score: soft fits with the floor f = lerp(0.05, 0.5, chaos)
     {
         History h; int sk = 9, ss = 9;
         Info f = lib.files[10]; f.tempo = 0.f;        // bass with no tempo
         check (score (f, recycler::BASS, target (1.f), h, sk, ss) == 0.f, "picker: score 0 for tempo-0 non-texture");
-        check (score (lib.files[38], recycler::TEXTURE, target (1.f), h, sk, ss) > 0.f && sk == 0, "picker: tempo-0 texture scores, k 0");
+        check (near (score (lib.files[38], recycler::TEXTURE, target (1.f), h, sk, ss), 0.9 * 0.5 * (0.5 + 0.5 * std::exp (-16.0 / 36.0)), 1e-4) && sk == 0,
+               "picker: tempo-0 texture: tempoFit = f, k 0", score (lib.files[38], recycler::TEXTURE, target (1.f), h, sk, ss));
         check (score (lib.files[0], recycler::DRUMS, target (0.f), h, sk, ss) > 0.f && ss == 0, "picker: drum scores with s 0");
-        check (score (lib.files[13], recycler::BASS, target (0.f), h, sk, ss) == 0.f, "picker: chaos 0 excludes 180 BPM vs 120");
+        const float far = score (lib.files[13], recycler::BASS, target (0.f), h, sk, ss);   // 180 vs 120, A minor = C major
+        check (near (far, 0.775 * 0.05, 1e-3), "picker: chaos 0, 180 BPM vs 120 floors at role * 0.05 (not 0)", far);
+        Info atonal = lib.files[10]; atonal.key = -1;   // 120 BPM, role 0.7
+        const float at = score (atonal, recycler::BASS, target (0.25f), h, sk, ss);
+        check (near (at, 0.7 * 0.1625, 1e-4) && ss == 0, "picker: atonal bass keyFit = f (0.1625 at chaos 0.25)", at);
+        Info offKey = lib.files[10]; offKey.key = 6;     // F# major vs C major: s = -6, way past shiftMax 2
+        const float ok = score (offKey, recycler::BASS, target (0.f), h, sk, ss);
+        check (ok > 0.f && ss == -6, "picker: |s| > shiftMax still scores > 0", ok);
     }
 
-    // chaos 0: safe bounds, drums unshifted
+    // the Rack smoke folder at C minor 120, chaos 0.25: bass and melody slots get bass and melody files, not the drum loop
     {
-        bool safe = true, drumsZero = true; int chosen = 0;
+        const recycler::library::Library sm = smoke();
+        int bassOk = 0, melodyOk = 0;
+        for (uint64_t seed = 1; seed <= 200; ++seed)
+        {
+            Choice slots[4]; pickAllSeed (sm, cMinor (0.25f), seed, slots);
+            if (slots[1].file >= 0 && slots[1].file <= 2) ++bassOk;
+            if (slots[2].file >= 3 && slots[2].file <= 5) ++melodyOk;
+        }
+        check (bassOk >= 196, "picker: smoke folder -> bass slot holds a bass file >= 98 % (count of 200)", bassOk);
+        check (melodyOk >= 196, "picker: smoke folder -> melody slot holds a melody file >= 98 % (count of 200)", melodyOk);
+
+        int hits[7] = { 0, 0, 0, 0, 0, 0, 0 };
+        History h;
+        for (uint64_t seed = 1; seed <= 200; ++seed)
+        {
+            Rng r (seed);
+            const int f = pickOne (sm, recycler::BASS, cMinor (1.f), -1, none, h, r).file;
+            if (f >= 0) ++hits[f];
+        }
+        check (hits[0] >= 20, "picker: chaos 1 -> G minor bass picked >= 10 % (count of 200)", hits[0]);
+        check (hits[1] >= 20, "picker: chaos 1 -> A major bass picked >= 10 % (count of 200)", hits[1]);
+        check (hits[2] >= 20, "picker: chaos 1 -> F# minor bass picked >= 10 % (count of 200)", hits[2]);
+    }
+
+    // chaos 0 with one perfect bass (120, C minor) among two stronger but off ones: the perfect one wins >= 80 %
+    {
+        recycler::library::Library three = smoke();
+        three.files.resize (3);
+        three.files[1].tempo = 120.f; three.files[1].key = 0; three.files[1].minor = true; three.files[1].role[recycler::BASS] = 0.65f;
+        three.files[0].role[recycler::BASS] = 0.74f; three.files[2].role[recycler::BASS] = 0.74f;
+        int perfect = 0; History h;
+        for (uint64_t seed = 1; seed <= 200; ++seed)
+        {
+            Rng r (seed);
+            if (pickOne (three, recycler::BASS, cMinor (0.f), -1, none, h, r).file == 1) ++perfect;
+        }
+        check (perfect >= 160, "picker: chaos 0 -> perfect bass picked >= 80 % (count of 200)", perfect);
+    }
+
+    // chaos 0: picks stay in the safe zone, drums unshifted
+    {
+        int safe = 0, drumsShifted = 0, chosen = 0;
         for (uint64_t seed = 1; seed <= 50; ++seed)
         {
             Choice slots[4]; pickAllSeed (lib, target (0.f), seed, slots);
@@ -99,13 +183,13 @@ inline void testPicker()
                 const Info& f = lib.files[slots[j].file];
                 float e = 0.f;
                 if (f.tempo > 0.f) octaveFor (f.tempo, 120.f, e);
-                if (e > 0.11f || std::abs (slots[j].s) > 2) safe = false;
-                if (j == recycler::DRUMS && slots[j].s != 0) drumsZero = false;
+                if (e <= 0.11f && std::abs (slots[j].s) <= 2) ++safe;
+                if (j == recycler::DRUMS && slots[j].s != 0) ++drumsShifted;
             }
         }
         check (chosen == 200, "picker: chaos 0 fills every slot of the fixture", chosen);
-        check (safe, "picker: chaos 0 -> cost <= 0.11 and |s| <= 2 for every pick");
-        check (drumsZero, "picker: chaos 0 -> drums s = 0");
+        check (safe >= 190, "picker: chaos 0 -> cost <= 0.11 and |s| <= 2 for >= 95 % of picks (count of 200)", safe);
+        check (drumsShifted == 0, "picker: chaos 0 -> drums s = 0", drumsShifted);
     }
 
     // chaos 1: leaves the safe zone, drums get shifted, texture may use tempo-0 files and nobody else does
@@ -133,15 +217,44 @@ inline void testPicker()
         check (! otherZero, "picker: drums/bass/melody never pick a tempo-0 file");
     }
 
+    // no file twice in a combo
+    {
+        int dup = 0;
+        for (uint64_t seed = 1; seed <= 200; ++seed)
+        {
+            Choice slots[4]; pickAllSeed (lib, target (1.f), seed, slots);
+            if (! distinct (slots)) ++dup;
+        }
+        check (dup == 0, "picker: pickAll never puts one file in two slots (200 seeds, chaos 1)", dup);
+        const int others[4] = { 10, 11, 19, 25 };
+        bool clean = true; History h;
+        for (uint64_t seed = 1; seed <= 200; ++seed)
+        {
+            Rng r (seed);
+            const int f = pickOne (lib, recycler::BASS, target (1.f), 12, others, h, r).file;
+            if (f == 10 || f == 11 || f == 19 || f == 25 || f == 12) clean = false;
+        }
+        check (clean, "picker: pickOne never returns a file in otherFiles or currentFile");
+    }
+
     // locks
     {
         bool locked[4] = { false, true, false, false };
-        Choice slots[4]; slots[1].file = 7; slots[1].k = 1; slots[1].s = -2;
+        Choice slots[4]; slots[1].file = 7; slots[1].k = 1; slots[1].s = -2;    // a strong drum file locked in the bass slot
         History h; Rng rng (3);
         pickAll (lib, target (0.5f), locked, slots, h, rng);
         check (slots[1].file == 7 && slots[1].k == 1 && slots[1].s == -2, "picker: locked slot unchanged", slots[1].file);
         check (! h.seen (1, 7), "picker: locked slot not pushed to history");
         check (slots[0].file >= 0 && h.seen (0, slots[0].file), "picker: pickAll pushes picks to history", slots[0].file);
+        int leaks = 0;
+        for (uint64_t seed = 1; seed <= 200; ++seed)
+        {
+            Choice s[4]; s[1].file = 7;
+            History hh; Rng r (seed);
+            pickAll (lib, target (0.5f), locked, s, hh, r);
+            if (s[0].file == 7 || s[2].file == 7 || s[3].file == 7) ++leaks;
+        }
+        check (leaks == 0, "picker: locked slot's file never appears in another slot (200 seeds)", leaks);
     }
 
     // determinism
@@ -175,7 +288,7 @@ inline void testPicker()
         for (uint64_t seed = 1; seed <= 200; ++seed)
         {
             Rng r (seed);
-            const int f = pickOne (tie, recycler::BASS, target (0.f), -1, h, r).file;
+            const int f = pickOne (tie, recycler::BASS, target (0.f), -1, none, h, r).file;
             if (f == 5) ++low;
             if (f == 12) ++high;
         }
@@ -186,14 +299,14 @@ inline void testPicker()
     {
         recycler::library::Library one; one.files.push_back (lib.files[10]);
         History h; Rng rng (5);
-        check (pickOne (one, recycler::BASS, target (0.25f), 0, h, rng).file == -1, "picker: only candidate is current -> -1");
-        check (pickOne (one, recycler::BASS, target (0.25f), -1, h, rng).file == 0, "picker: one-file library picks it");
+        check (pickOne (one, recycler::BASS, target (0.25f), 0, none, h, rng).file == -1, "picker: only candidate is current -> -1");
+        check (pickOne (one, recycler::BASS, target (0.25f), -1, none, h, rng).file == 0, "picker: one-file library picks it");
         bool never = true;
         for (uint64_t seed = 1; seed <= 50; ++seed)
         {
             Rng r (seed);
             for (int j = 0; j < 4; ++j)
-                if (pickOne (lib, j, target (0.25f), j * 10, h, r).file == j * 10) never = false;
+                if (pickOne (lib, j, target (0.25f), j * 10, none, h, r).file == j * 10) never = false;
         }
         check (never, "picker: pickOne never returns currentFile");
     }
@@ -205,8 +318,8 @@ inline void testPicker()
         for (uint64_t seed = 1; seed <= 200; ++seed)
         {
             Rng a (seed), b (seed);
-            if (pickOne (lib, recycler::BASS, target (0.5f), -1, fresh, a).file == 10) ++freshHits;
-            if (pickOne (lib, recycler::BASS, target (0.5f), -1, seen, b).file == 10) ++seenHits;
+            if (pickOne (lib, recycler::BASS, target (0.5f), -1, none, fresh, a).file == 10) ++freshHits;
+            if (pickOne (lib, recycler::BASS, target (0.5f), -1, none, seen, b).file == 10) ++seenHits;
         }
         check (seenHits < freshHits, "picker: history lowers the chance of a repeat", seenHits - freshHits);
     }
@@ -215,7 +328,7 @@ inline void testPicker()
     {
         recycler::library::Library weak; weak.files.push_back (lib.files[10]); weak.files[0].role[recycler::BASS] = 0.3f;
         History h; Rng rng (9);
-        check (pickOne (weak, recycler::BASS, target (0.f), -1, h, rng).file == 0, "picker: below-threshold falls back to best role files");
+        check (pickOne (weak, recycler::BASS, target (0.f), -1, none, h, rng).file == 0, "picker: below-threshold falls back to best role files");
     }
 
     // empty library
@@ -225,7 +338,7 @@ inline void testPicker()
         Choice slots[4]; History h; Rng rng (1);
         pickAll (empty, target (0.5f), locked, slots, h, rng);
         check (slots[0].file == -1 && slots[1].file == -1 && slots[2].file == -1 && slots[3].file == -1, "picker: empty library -> all -1");
-        check (pickOne (empty, recycler::TEXTURE, target (1.f), -1, h, rng).file == -1, "picker: empty library pickOne -> -1");
+        check (pickOne (empty, recycler::TEXTURE, target (1.f), -1, none, h, rng).file == -1, "picker: empty library pickOne -> -1");
     }
 
     // history
