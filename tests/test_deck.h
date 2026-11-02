@@ -19,6 +19,21 @@ inline void testDeck()
            "deck: order = 01_A, C:/crate/02_b, D:/other/02_b, 03_c", ord.size() == 4 ? ord[1] : -1);
     check (deck::order (library::Library()).empty(), "deck: order of an empty library is empty");
 
+    // case-insensitive: byte order would put "B" before "a"
+    library::Library cs;
+    const char* csPaths[2] = { "C:/crate/B.wav", "C:/crate/a.wav" };
+    for (int i = 0; i < 2; ++i) { Info f; f.path = csPaths[i]; cs.files.push_back (f); }
+    const std::vector<int> csOrd = deck::order (cs);
+    check (csOrd.size() == 2 && csOrd[0] == 1 && csOrd[1] == 0, "deck: order is case-insensitive (a before B)", csOrd.size() == 2 ? csOrd[0] : -1);
+
+    // backslash paths (the Windows scanner): the name is split on either slash
+    check (deck::nameKey ("C:\\a\\B.WAV") == "b.wav", "deck: nameKey splits on a backslash and lower-cases");
+    library::Library bs;
+    const char* bsPaths[2] = { "C:\\z\\02_x.wav", "D:\\a\\01_y.wav" };
+    for (int i = 0; i < 2; ++i) { Info f; f.path = bsPaths[i]; bs.files.push_back (f); }
+    const std::vector<int> bsOrd = deck::order (bs);
+    check (bsOrd.size() == 2 && bsOrd[0] == 1 && bsOrd[1] == 0, "deck: order by file name on backslash paths", bsOrd.size() == 2 ? bsOrd[0] : -1);
+
     // positionOf
     check (deck::positionOf (lib, ord, "C:/crate/03_c.wav") == 3, "deck: positionOf 03_c -> 3", deck::positionOf (lib, ord, "C:/crate/03_c.wav"));
     check (deck::positionOf (lib, ord, "C:/crate/01_A.wav") == 0, "deck: positionOf 01_A -> 0", deck::positionOf (lib, ord, "C:/crate/01_A.wav"));

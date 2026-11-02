@@ -56,7 +56,8 @@ inline int step (int pos, int dir, int n)
 // where slot starts in a crate of n; -1 when the crate is empty
 inline int startPos (int slot, int n) { return n > 0 ? slot % n : -1; }
 
-// the file's strongest role (ties go to the lower role): its stretch kind in DECK mode
+// the file's strongest role (ties go to the lower role): its stretch kind in DECK mode.
+// A file with no role scores reads as DRUMS, so it is never keyed (no pitch evidence).
 inline int kindOf (const Info& info)
 {
     int k = 0;
@@ -65,7 +66,7 @@ inline int kindOf (const Info& info)
     return k;
 }
 
-// octave and key shift of a crate file at target t
+// octave and key shift of a crate file at target t. Only k and s are set; .file is left unset (-1).
 inline picker::Choice fit (const Info& info, const picker::Target& t)
 {
     picker::Choice c;
