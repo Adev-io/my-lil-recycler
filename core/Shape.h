@@ -23,9 +23,11 @@ inline size_t readIndex (size_t fwd, size_t n, int start, bool rev)
     return rev ? n - 1 - i : i;
 }
 
-// The frame after i for a head playing forward or in reverse, wrapping. Needs n > 0.
-inline size_t stepIndex (size_t i, bool rev, size_t n)
+// The frame after i (reduced mod n first) for a head playing forward or in reverse, wrapping. 0 when n is 0.
+inline size_t stepIndex (size_t i, size_t n, bool rev)
 {
+    if (n == 0) return 0;
+    i %= n;
     if (! rev) return (i + 1) % n;
     return i == 0 ? n - 1 : i - 1;
 }
@@ -41,14 +43,17 @@ inline float cutoffFor (float f)
 struct Svf
 {
     float ic1[2] = { 0.f, 0.f }, ic2[2] = { 0.f, 0.f };
-    void reset() { ic1[0] = ic1[1] = ic2[0] = ic2[1] = 0.f; }
+    bool on = false;   // false: the next active sample primes the state
+    void reset() { ic1[0] = ic1[1] = ic2[0] = ic2[1] = 0.f; on = false; }
 };
 
-// One stereo sample at knob f (-1 .. 1). The dead zone passes l, r untouched and clears the state, so leaving it
-// starts clean. Cutoff clamped to 0.45 * sr.
+// One stereo sample at knob f (-1 .. 1). The dead zone passes l, r untouched and clears the state; leaving it into
+// low-pass primes the state to the input's DC steady state, so there is no tick. Cutoff clamped to 0.45 * sr.
+// A non-finite state (NaN / inf input) resets the filter and outputs silence for that sample.
 inline void filter (Svf& s, float f, float sr, float& l, float& r)
 {
     if (std::fabs (f) < DEAD) { s.reset(); return; }
+    if (! s.on) { s.on = true; if (f < 0.f) { s.ic2[0] = l; s.ic2[1] = r; } }
     const float fc = std::min (cutoffFor (f), 0.45f * sr);
     const float g = std::tan (PI_F * fc / sr), k = 1.41421356f;   // k = 1 / Q
     const float a1 = 1.f / (1.f + g * (g + k)), a2 = g * a1, a3 = g * a2;
@@ -63,6 +68,7 @@ inline void filter (Svf& s, float f, float sr, float& l, float& r)
         s.ic2[c] = 2.f * v2 - s.ic2[c];
         *io[c] = f < 0.f ? v2 : v0 - k * v1 - v2;   // low-pass : high-pass
     }
+    if (! std::isfinite (s.ic1[0] + s.ic2[0] + s.ic1[1] + s.ic2[1])) { s.reset(); l = r = 0.f; }
 }
 
 // Pan p (-1 left .. +1 right, clamped): centre unity, the far side falls on a cosine law, nothing above 1.
