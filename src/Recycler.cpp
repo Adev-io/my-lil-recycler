@@ -813,15 +813,20 @@ struct Recycler : Module
         post (j, true);
     }
 
-    // the menu's Deck mode. LOCK becomes a previous button, so every latch starts released; switching off re-renders the
-    // slots with the slot-role rules (the DRUMS slot stops keying, the stretch follows the slot again)
+    // the menu's Deck mode. LOCK becomes a previous button, so every latch starts released. Switching off drops the DRUMS
+    // slot's key shift (the picker never keys it; DECK may have shifted it) and re-renders every slot by its role.
     void setDeck (bool on)
     {
         if (on == deck.load()) return;
         for (int i = 0; i < 4; ++i) params[LOCK_PARAM + i].setValue (0.f);
         deck = on;
         if (on) deckStartRequest = true;
-        else retargetRequest = true;
+        else
+        {
+            // the picker never keys the DRUMS slot; drop the shift DECK gave it
+            { std::lock_guard<std::mutex> lk (stateMutex); slots[rc::DRUMS].s = 0; }
+            retargetRequest = true;
+        }
     }
 
     void onReset (const ResetEvent& e) override
