@@ -494,7 +494,8 @@ struct Recycler : Module
         {
             if (want[j] == 0) continue;
             std::string path;
-            { std::lock_guard<std::mutex> lk (stateMutex); path = slots[j].path; }
+            bool missing = false;
+            { std::lock_guard<std::mutex> lk (stateMutex); path = slots[j].path; missing = slots[j].missing; }
             const int dir = want[j] > 0 ? 1 : -1;
             int count = want[j] > 0 ? want[j] : -want[j];
             int pos = rc::deck::positionOf (pool, ord, path);
@@ -502,7 +503,7 @@ struct Recycler : Module
             if (pos < 0) { pos = rc::deck::step (pos, dir, n); --count; }   // off the crate: the first step lands on the first / last file
             count %= n;   // n steps round the crate: back where it was
             for (int c = 0; c < count; ++c) pos = rc::deck::step (pos, dir, n);
-            if (pos == oldPos) continue;   // a full lap lands on the same file: no new gen, no re-render
+            if (pos == oldPos && ! missing) continue;   // a full lap lands on the same file: no new gen, no re-render (a missing file is retried)
             deckLoad (j, pool, ord, pos);
         }
     }
@@ -515,6 +516,12 @@ struct Recycler : Module
         rc::library::Library pool;
         folderLib (pool);
         const std::vector<int> ord = rc::deck::order (pool);
+        if (ord.empty())
+        {
+            std::lock_guard<std::mutex> lk (stateMutex);
+            for (int j = 0; j < 4; ++j) { slots[j].deckPos = -1; slots[j].deckN = 0; }   // no crate: no stale NN/NN
+            return;
+        }
         for (int j = 0; j < 4; ++j) deckLoad (j, pool, ord, rc::deck::startPos (j, (int) ord.size()));
     }
 
