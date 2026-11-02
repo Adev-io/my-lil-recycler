@@ -1459,6 +1459,7 @@ struct RecyclerWidget : ModuleWidget
             {
                 RoundSmallBlackKnob* k = createParamCentered<RoundSmallBlackKnob> (at (L::PITCH_PARAM[i]), module, Recycler::PITCH_PARAM + i);
                 k->smooth = false;
+                if (engine::ParamQuantity* pq = k->getParamQuantity()) pq->smoothEnabled = false;   // initParamQuantity already copied smooth = true
                 addParam (k);
             }
             addParam (createParamCentered<RoundSmallBlackKnob> (at (L::FILTER_PARAM[i]), module, Recycler::FILTER_PARAM + i));
@@ -1468,6 +1469,7 @@ struct RecyclerWidget : ModuleWidget
                 // before the next step instead of chaining into a stutter while the knob is turned
                 RoundSmallBlackKnob* k = createParamCentered<RoundSmallBlackKnob> (at (L::START_PARAM[i]), module, Recycler::START_PARAM + i);
                 k->smooth = false;
+                if (engine::ParamQuantity* pq = k->getParamQuantity()) pq->smoothEnabled = false;   // initParamQuantity already copied smooth = true
                 addParam (k);
             }
             addParam (createParamCentered<VCVLatch> (at (L::REV_PARAM[i]), module, Recycler::REV_PARAM + i));

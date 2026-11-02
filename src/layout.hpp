@@ -3,7 +3,7 @@
 namespace layout {
 namespace recycler {
 constexpr float FOLDER_PARAM[2] = {10.00f, 18.00f};
-constexpr float LIB_LIGHT[2] = {172.80f, 18.00f};
+constexpr float LIB_LIGHT[2] = {122.00f, 18.00f};
 constexpr float BPM_PARAM[2] = {14.00f, 34.00f};
 constexpr float ROOT_PARAM[2] = {34.00f, 34.00f};
 constexpr float MODE_PARAM[2] = {52.00f, 34.00f};

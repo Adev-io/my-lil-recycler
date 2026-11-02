@@ -98,7 +98,7 @@ NAME_BOX = [(4.0, y - 3.0, 54.0, 6.0) for y in STEM_Y]
 # (name, kind, x, y, label). A name ending in '+i' is stem i of a per-stem array.
 RECYCLER = [
     ('FOLDER_PARAM', 'button', 10.0, ROW_LIB, 'FOLDER'),
-    ('LIB_LIGHT', 'light', 172.8, ROW_LIB, ''),
+    ('LIB_LIGHT', 'light', 122.0, ROW_LIB, ''),
     ('BPM_PARAM', 'knob', 14.0, ROW_LOCK, 'BPM'), ('ROOT_PARAM', 'knob', 34.0, ROW_LOCK, 'ROOT'),
     ('MODE_PARAM', 'button', 52.0, ROW_LOCK, 'MODE'), ('BARS_PARAM', 'button', 66.0, ROW_LOCK, 'BARS'),
     ('RUN_PARAM', 'button', 82.0, ROW_LOCK, 'RUN'), ('RUN_LIGHT', 'light', 88.0, 29.0, ''),
