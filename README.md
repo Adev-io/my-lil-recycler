@@ -74,8 +74,21 @@ was analysed so far.
 - AIFF and AIFC: PCM, `sowt` and `fl32`.
 - Other formats (MP3, FLAC and so on) are not scanned. A WAV or AIFF that cannot be read counts as skipped.
 
+## Deck mode
+
+Right-click > **Deck mode** plays your own crate in your order instead of re-rolling. The folder's files are the crate,
+in file-name order. Each slot is a free deck: **ROLL** (button or jack) goes to the next file, **LOCK** goes back one
+(it springs off again). Both wrap around, and every press counts. A step lands on the loop end like any swap; the name
+box shows `03/12 name`, and `›` in front while the new file waits for the loop end. Turning Deck mode on loads files 1-4
+into the four slots and releases every LOCK. Tempo and key lock still apply, by the file: a pitched loop is keyed on any
+slot, a drum loop never. BATCH and CHAOS do nothing in Deck mode.
+
+Make a crate from a list of paths (one per line) with `py -3 tools/mkcrate.py crate.txt <new folder>`: it copies the
+files as `01_name`, `02_name` ... so the list order becomes the deck order.
+
 ## Right-click menu
 
+- **Deck mode**: play the folder as a crate in file-name order (see Deck mode).
 - **Rescan folder**: picks up new, changed and deleted files.
 - **Forget library**: deletes the cache and empties the slots. Rescan to start over.
 - **Analysis cap**: 30, 60 or 120 seconds analysed per file (default 60). Applies to files analysed after the change;
