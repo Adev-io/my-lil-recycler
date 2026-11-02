@@ -51,7 +51,10 @@ if __name__ == '__main__':
     if len(sys.argv) != 3:
         sys.exit(__doc__ or 'usage: mkcrate.py <crate.txt> <crate folder>')
     with open(sys.argv[1], encoding='utf-8-sig') as f:
-        copied, missing = build(f.readlines(), sys.argv[2])
+        try:
+            copied, missing = build(f.readlines(), sys.argv[2])
+        except FileExistsError as e:
+            sys.exit(str(e))
     for p in missing:
         print('missing, skipped:', p)
     print(f'{len(copied)} files -> {sys.argv[2]}')
