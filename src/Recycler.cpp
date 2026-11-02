@@ -17,6 +17,7 @@
 #include "Picker.h"
 #include "Stretch.h"
 #include "Transport.h"
+#include "Deck.h"
 #include <osdialog.h>
 #include <sys/stat.h>
 #include <algorithm>
@@ -34,7 +35,7 @@ namespace rc = recycler;
 typedef rc::stretch::Stereo Stereo;
 
 // A rendered stem and the loop length (bars) it was rendered for, so it plays at the right speed whatever BARS says now.
-struct Buf { Stereo a; int bars = 1; };
+struct Buf { Stereo a; int bars = 1; uint32_t gen = 0; };   // gen: the SlotState::gen it was rendered for
 
 // Every Recycler in the process shares one cache file: saves and loads take turns (library::save writes one fixed .tmp).
 static std::mutex cacheMutex;
@@ -109,6 +110,8 @@ struct SlotState
     bool hasInfo = false;
     int k = 0, s = 0;      // octave and semitone shift of the last render
     bool missing = false;  // the file or its analysis is gone, or its render failed: the name is drawn magenta
+    int deckPos = -1, deckN = 0;   // DECK: place in the crate order (-1: not in it) and the crate size, for the name box
+    uint32_t gen = 0;      // set by each DECK step; the name box shows a cue mark until a buffer of this gen lands
 };
 
 // Worker jobs carry copies; the worker never reads params.
@@ -119,6 +122,7 @@ struct Job
     std::string folder; float cap = 60.f;                    // SCAN
     int slot = 0; std::string path; rc::Info info;           // RENDER
     rc::picker::Choice choice; rc::picker::Target target; int outRate = 48000;
+    int role = 0; uint32_t gen = 0;                          // RENDER: stretch kind, SlotState::gen
 };
 
 // One stem on the audio thread, which owns cur and old. Two equal-power fades: old -> cur (a swap, a drop, or a fade-in when
@@ -153,6 +157,8 @@ struct Recycler : Module
     std::atomic<float> pubBpm { 120.f }, pubChaos { 0.25f };
     std::atomic<int> pubRoot { 0 }, pubBars { 2 }, pubRate { 48000 };
     std::atomic<bool> pubMinor { true };
+    std::atomic<bool> deck { false }, deckStartRequest { false };
+    std::atomic<uint32_t> landed[4];   // written by the audio thread: the gen of the buffer each slot plays
 
     std::mutex stateMutex;   // UI + worker
     std::string folder;
@@ -167,6 +173,7 @@ struct Recycler : Module
     float scanCap = 60.f;
     std::string scanFolder, historyFolder;
     int unsaved = 0;
+    uint32_t nextGen = 0;
 
     // ---- audio thread only
     rc::Transport transport;
@@ -215,7 +222,7 @@ struct Recycler : Module
         configLight (RUN_LIGHT, "Running");
         configLight (RENDER_LIGHT, "Rendering (blinks while stems are being stretched)");
         paramQuantities[RUN_PARAM]->randomizeEnabled = false;
-        for (int i = 0; i < 4; ++i) { pending[i].store (nullptr); retired[i].store (nullptr); }
+        for (int i = 0; i < 4; ++i) { pending[i].store (nullptr); retired[i].store (nullptr); landed[i].store (0); }
         seed = random::u32() | 1u;
         lightDiv.setDivision (64);
         worker = std::thread ([this] { run(); });
@@ -281,11 +288,23 @@ struct Recycler : Module
         if (role != rc::DRUMS) s.s = rc::picker::shiftFor (s.info.key, s.info.minor, t.root, t.minor);
     }
 
+    // fit by the slot's role, or in DECK mode by the file itself (Deck.h)
+    void fitSlot (SlotState& s, int slot, const rc::picker::Target& t) const
+    {
+        if (! deck.load()) { fit (s, slot, t); return; }
+        const rc::picker::Choice c = rc::deck::fit (s.info, t);
+        s.k = c.k;
+        s.s = c.s;
+    }
+
+    // the stretch kind: the slot's role, or in DECK mode the file's strongest role (a drum loop slices on any slot)
     void postRender (int slot, const SlotState& s, const rc::picker::Target& t, int rate)
     {
         Job j;
         j.type = Job::RENDER;
         j.slot = slot;
+        j.role = deck.load() ? rc::deck::kindOf (s.info) : slot;
+        j.gen = s.gen;
         j.path = s.path;
         j.info = s.info;
         j.choice.k = s.k;
@@ -322,7 +341,7 @@ struct Recycler : Module
                 s.info = *info;
                 s.hasInfo = true;
                 s.missing = false;
-                fit (s, i, t);
+                fitSlot (s, i, t);
             }
             {
                 std::lock_guard<std::mutex> lk (stateMutex);
@@ -439,7 +458,7 @@ struct Recycler : Module
             {
                 std::lock_guard<std::mutex> lk (stateMutex);
                 if (slots[i].path.empty() || ! slots[i].hasInfo || slots[i].missing) continue;
-                fit (slots[i], i, t);
+                fitSlot (slots[i], i, t);
                 s = slots[i];
             }
             postRender (i, s, t, rate);
@@ -455,7 +474,7 @@ struct Recycler : Module
             int64_t total = 0;
             if (rc::audio::probe (j.path, fileRate, total, channels))
             {
-                const rc::stretch::Region g = rc::stretch::regionFor (j.info, j.slot, j.choice, j.target, fileRate);
+                const rc::stretch::Region g = rc::stretch::regionFor (j.info, j.role, j.choice, j.target, fileRate);
                 const int64_t start = std::min (std::max<int64_t> (0, g.start), total - 1);
                 const int64_t count = std::min (g.frames, total - start);
                 Stereo in;
@@ -466,7 +485,7 @@ struct Recycler : Module
                     ri.audio = &in;
                     ri.fileRate = rate;
                     ri.info = &j.info;
-                    ri.role = j.slot;
+                    ri.role = j.role;
                     ri.choice = j.choice;
                     ri.target = j.target;
                     ri.outRate = j.outRate;
@@ -477,6 +496,7 @@ struct Recycler : Module
                         buf = new Buf;
                         buf->a = std::move (out);
                         buf->bars = std::max (1, j.target.bars);
+                        buf->gen = j.gen;
                     }
                 }
             }
@@ -848,6 +868,7 @@ struct Recycler : Module
             {
                 Buf* prev = st.cur;
                 st.cur = pending[i].exchange (nullptr);
+                if (st.cur) landed[i].store (st.cur->gen, std::memory_order_relaxed);
                 fadeOut (st, prev, fadeSwap);   // no prev: fade in from silence
             }
             else if (jumped && st.cur && st.cur->a.frames())
