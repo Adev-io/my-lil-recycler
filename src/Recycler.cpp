@@ -142,10 +142,12 @@ struct Stem
 struct Recycler : Module
 {
     enum ParamId { FOLDER_PARAM, BPM_PARAM, ROOT_PARAM, MODE_PARAM, BARS_PARAM, RUN_PARAM, ENUMS (ROLL_PARAM, 4), ENUMS (LOCK_PARAM, 4),
-                   ENUMS (LEVEL_PARAM, 4), BATCH_PARAM, CHAOS_PARAM, PARAMS_LEN };
+                   ENUMS (LEVEL_PARAM, 4), BATCH_PARAM, CHAOS_PARAM,
+                   ENUMS (PITCH_PARAM, 4), ENUMS (FILTER_PARAM, 4), ENUMS (PAN_PARAM, 4), ENUMS (START_PARAM, 4), ENUMS (REV_PARAM, 4),
+                   PARAMS_LEN };   // new params only ever go at the end: Rack saves params by id
     enum InputId { CLOCK_INPUT, VOCT_INPUT, RESET_INPUT, RUN_INPUT, ENUMS (ROLL_INPUT, 4), BATCH_INPUT, CHAOS_INPUT, INPUTS_LEN };
     enum OutputId { ENUMS (OUT_L_OUTPUT, 4), ENUMS (OUT_R_OUTPUT, 4), MIX_L_OUTPUT, MIX_R_OUTPUT, OUTPUTS_LEN };
-    enum LightId { ENUMS (LIB_LIGHT, 2), RUN_LIGHT, ENUMS (LOCK_LIGHT, 4), ENUMS (RENDER_LIGHT, 2), LIGHTS_LEN };
+    enum LightId { ENUMS (LIB_LIGHT, 2), RUN_LIGHT, ENUMS (LOCK_LIGHT, 4), ENUMS (RENDER_LIGHT, 2), ENUMS (REV_LIGHT, 4), LIGHTS_LEN };
 
     // ---- shared: worker queue and status (atomics are read by the audio thread and the UI)
     std::mutex jobMutex;
@@ -207,7 +209,13 @@ struct Recycler : Module
             const std::string r = ROLE_NAMES[i];
             configButton (ROLL_PARAM + i, r + " re-roll: pick another file");
             configSwitch (LOCK_PARAM + i, 0.f, 1.f, 0.f, r + " lock (BATCH leaves it alone)", { "Unlocked", "Locked" });
-            configParam (LEVEL_PARAM + i, 0.f, 1.f, 0.8f, r + " level", " dB", -10.f, 20.f);
+            configParam (LEVEL_PARAM + i, 0.f, 2.f, 0.8f, r + " level", " dB", -10.f, 20.f);   // 2.0 = +6 dB; old values keep their gain
+            configParam (PITCH_PARAM + i, -12.f, 12.f, 0.f, r + " pitch (re-renders, swaps on the loop end)", " semitones")->snapEnabled = true;
+            configParam (FILTER_PARAM + i, -1.f, 1.f, 0.f, r + " filter (left low-pass, right high-pass, centre off)", "%", 0.f, 100.f);
+            configParam (PAN_PARAM + i, -1.f, 1.f, 0.f, r + " pan", "%", 0.f, 100.f);
+            configParam (START_PARAM + i, 0.f, 15.f, 0.f, r + " loop start", "/16")->snapEnabled = true;
+            configSwitch (REV_PARAM + i, 0.f, 1.f, 0.f, r + " reverse", { "Forward", "Reverse" });
+            configLight (REV_LIGHT + i, r + " reversed");
             configInput (ROLL_INPUT + i, r + " re-roll trigger");
             configOutput (OUT_L_OUTPUT + i, r + " left (L + R mono while R is unpatched)");
             configOutput (OUT_R_OUTPUT + i, r + " right");
@@ -1088,6 +1096,7 @@ struct Recycler : Module
         lights[RUN_LIGHT].setBrightness (running ? 1.f : 0.f);
         const bool deckOn = deck.load (std::memory_order_relaxed);
         for (int i = 0; i < 4; ++i) lights[LOCK_LIGHT + i].setBrightness (! deckOn && params[LOCK_PARAM + i].getValue() > 0.5f ? 1.f : 0.f);
+        for (int i = 0; i < 4; ++i) lights[REV_LIGHT + i].setBrightness (params[REV_PARAM + i].getValue() > 0.5f ? 1.f : 0.f);
         lights[RENDER_LIGHT].setBrightness (0.f);
         lights[RENDER_LIGHT + 1].setBrightness (renders.load() > 0 && blink ? 1.f : 0.f);
     }
@@ -1190,7 +1199,7 @@ struct Recycler : Module
             if (json_t* p = json_object_get (o, "path"))
                 if (json_is_string (p)) s[i].path = json_string_value (p);
             if (flag (o, "locked", b)) params[LOCK_PARAM + i].setValue (b && ! deckJson ? 1.f : 0.f);   // DECK: LOCK is a button
-            if (number (o, "level", v)) params[LEVEL_PARAM + i].setValue ((float) clampD (v, 0.0, 1.0));
+            if (number (o, "level", v)) params[LEVEL_PARAM + i].setValue ((float) clampD (v, 0.0, 2.0));
             if (number (o, "k", v)) s[i].k = (int) clampD (v, -1.0, 1.0);
             if (number (o, "s", v)) s[i].s = (int) clampD (v, -12.0, 12.0);
         }
