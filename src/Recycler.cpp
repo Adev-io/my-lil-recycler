@@ -18,6 +18,7 @@
 #include "File.h"
 #include "Library.h"
 #include "Picker.h"
+#include "Shape.h"
 #include "Stretch.h"
 #include "Transport.h"
 #include "Deck.h"
@@ -137,6 +138,10 @@ struct Stem
     Buf* old = nullptr;
     size_t oldPos = 0, jumpPos = 0, lastIdx = 0;
     int fadeLeft = 0, fadeLen = 1, jumpLeft = 0, jumpLen = 1;
+    int start = 0;                                        // START / REV the slot last read with: a change declicks like a jump
+    bool rev = false, oldRev = false, jumpRev = false;    // the direction each head steps in
+    float filt = 0.f;                                     // FILTER knob, smoothed (~10 ms)
+    rc::shape::Svf svf;
 };
 
 struct Recycler : Module
@@ -916,7 +921,8 @@ struct Recycler : Module
     static void fadeOut (Stem& st, Buf* from, int len)
     {
         st.old = from;
-        st.oldPos = from && from->a.frames() ? (st.lastIdx + 1) % from->a.frames() : 0;
+        st.oldPos = from && from->a.frames() ? rc::shape::stepIndex (st.lastIdx, from->a.frames(), st.rev) : 0;
+        st.oldRev = st.rev;
         st.fadeLeft = st.fadeLen = std::max (1, len);
         st.jumpLeft = 0;   // cur changes: its pre-jump head means nothing now
     }
@@ -986,12 +992,16 @@ struct Recycler : Module
         const float step = 1.f / (0.005f * sr);   // 5 ms run / stop ramp
         runGain = running ? std::min (1.f, runGain + step) : std::max (0.f, runGain - step);
         const int fadeSwap = (int) (0.02f * sr), fadeJump = (int) (0.005f * sr);
+        const float filtCoef = 1.f - std::exp (-1.f / (0.01f * sr));   // ~10 ms knob smoothing
         const double loopBars = BAR_COUNTS[barsIndex()];
         const uint32_t drop = dropMask.load (std::memory_order_relaxed);
         float mixL = 0.f, mixR = 0.f;
         for (int i = 0; i < 4; ++i)
         {
             Stem& st = stems[i];
+            const int startNow = (int) std::lround (params[START_PARAM + i].getValue());
+            const bool revNow = params[REV_PARAM + i].getValue() > 0.5f;
+            const bool shapeJump = startNow != st.start || revNow != st.rev;
             if (st.old && st.fadeLeft == 0 && ! retired[i].load (std::memory_order_relaxed))
             {
                 retired[i].store (st.old);
@@ -1013,18 +1023,24 @@ struct Recycler : Module
                 if (st.cur) landed[i].store (st.cur->gen, std::memory_order_relaxed);
                 fadeOut (st, prev, fadeSwap);   // no prev: fade in from silence
             }
-            else if (jumped && st.cur && st.cur->a.frames())
+            else if ((jumped || shapeJump) && st.cur && st.cur->a.frames())
             {
-                // declick the jump; landing mid-declick, keep whichever head is louder now
-                if (st.jumpLeft == 0 || 2 * st.jumpLeft < st.jumpLen) st.jumpPos = (st.lastIdx + 1) % st.cur->a.frames();
+                // declick the jump (RESET, START or REV); landing mid-declick, keep whichever head is louder now
+                if (st.jumpLeft == 0 || 2 * st.jumpLeft < st.jumpLen)
+                {
+                    st.jumpPos = rc::shape::stepIndex (st.lastIdx, st.cur->a.frames(), st.rev);
+                    st.jumpRev = st.rev;
+                }
                 st.jumpLeft = st.jumpLen = std::max (1, fadeJump);
             }
+            st.start = startNow;
+            st.rev = revNow;
 
             float l = 0.f, r = 0.f;
             if (st.cur && st.cur->a.frames())
             {
                 const Stereo& c = st.cur->a;
-                const size_t idx = frameAt (st.cur, phase, loopBars);
+                const size_t idx = rc::shape::readIndex (frameAt (st.cur, phase, loopBars), c.frames(), st.start, st.rev);
                 l = c.l[idx];
                 r = c.r[idx];
                 st.lastIdx = idx;
@@ -1034,7 +1050,7 @@ struct Recycler : Module
                     const float gIn = std::sin (a), gOut = std::cos (a);
                     l = l * gIn + c.l[st.jumpPos] * gOut;
                     r = r * gIn + c.r[st.jumpPos] * gOut;
-                    st.jumpPos = (st.jumpPos + 1) % c.frames();
+                    st.jumpPos = rc::shape::stepIndex (st.jumpPos, c.frames(), st.jumpRev);
                     --st.jumpLeft;
                 }
             }
@@ -1047,16 +1063,21 @@ struct Recycler : Module
                 {
                     ol = st.old->a.l[st.oldPos];
                     orr = st.old->a.r[st.oldPos];
-                    st.oldPos = (st.oldPos + 1) % st.old->a.frames();
+                    st.oldPos = rc::shape::stepIndex (st.oldPos, st.old->a.frames(), st.oldRev);
                 }
                 l = l * gIn + ol * gOut;
                 r = r * gIn + orr * gOut;
                 --st.fadeLeft;
             }
 
+            if (! st.cur && st.fadeLeft == 0) st.svf.reset();   // silent (not mid drop-fade): the next stem starts clean
+            st.filt += (params[FILTER_PARAM + i].getValue() - st.filt) * filtCoef;
+            rc::shape::filter (st.svf, st.filt, sr, l, r);
+            float gl = 1.f, gr = 1.f;
+            rc::shape::panGains (params[PAN_PARAM + i].getValue(), gl, gr);
             const float g = params[LEVEL_PARAM + i].getValue() * 5.f * runGain;
-            l = finite0 (l * g);
-            r = finite0 (r * g);
+            l = finite0 (l * g * gl);
+            r = finite0 (r * g * gr);
             outputs[OUT_L_OUTPUT + i].setVoltage (outputs[OUT_R_OUTPUT + i].isConnected() ? l : 0.5f * (l + r));
             outputs[OUT_R_OUTPUT + i].setVoltage (r);
             mixL += l;
