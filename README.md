@@ -86,6 +86,22 @@ slot, a drum loop never. BATCH and CHAOS do nothing in Deck mode.
 Make a crate from a list of paths (one per line) with `py -3 tools/mkcrate.py crate.txt <new folder>`: it copies the
 files as `01_name`, `02_name` ... so the list order becomes the deck order. Recycler only reads WAV and AIFF, so other files leave gaps in the numbers.
 
+## Shaping each slot
+
+Every slot row has its own shaping controls. They belong to the slot, so they stay put when you re-roll or step the deck.
+
+- **LEVEL**: silent to +6 dB.
+- **PITCH**: -12 to +12 semitones on top of the key lock. Tempo stays locked; the slot re-renders and the new pitch lands
+  on the loop end.
+- **FILT**: centre is off. Turn left for a low-pass sweep, right for a high-pass sweep.
+- **PAN**: left to right; centre leaves the stem as it is. With the R jack unpatched the L jack carries mono (L + R), so
+  PAN then only turns that slot down, up to -6 dB at a hard side.
+- **START**: moves where the loop starts, in sixteenths of the loop.
+- **REV**: plays the slot backwards.
+
+Patches saved with 2.1 load with these at neutral and sound the same. The panel is 36 HP now: in an older patch, drag the
+module to its right out of the way once.
+
 ## Right-click menu
 
 - **Deck mode**: play the folder as a crate in file-name order (see Deck mode).
