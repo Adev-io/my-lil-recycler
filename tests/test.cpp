@@ -8,6 +8,7 @@
 #include "test_file.h"
 #include "test_picker.h"
 #include "test_stretch.h"
+#include "test_deck.h"
 
 int main()
 {
@@ -18,6 +19,7 @@ int main()
     testFile();
     testPicker();
     testStretch();
+    testDeck();
     std::printf ("%s: %d failure(s)\n", failures ? "FAILED" : "passed", failures);
     return failures ? 1 : 0;
 }
