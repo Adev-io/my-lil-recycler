@@ -79,12 +79,12 @@ was analysed so far.
 Right-click > **Deck mode** plays your own crate in your order instead of re-rolling. The folder's files are the crate,
 in file-name order. Each slot is a free deck: **ROLL** (button or jack) goes to the next file, **LOCK** goes back one
 (it springs off again). Both wrap around, and every press counts. A step lands on the loop end like any swap; the name
-box shows `03/12 name`, and `›` in front while the new file waits for the loop end. Turning Deck mode on loads files 1-4
+box shows `03/12 name`, and `›` in front while the new file waits for the loop end (stopped, it lands at once). Turning Deck mode on loads files 1-4
 into the four slots and releases every LOCK. Tempo and key lock still apply, by the file: a pitched loop is keyed on any
 slot, a drum loop never. BATCH and CHAOS do nothing in Deck mode.
 
 Make a crate from a list of paths (one per line) with `py -3 tools/mkcrate.py crate.txt <new folder>`: it copies the
-files as `01_name`, `02_name` ... so the list order becomes the deck order.
+files as `01_name`, `02_name` ... so the list order becomes the deck order. Recycler only reads WAV and AIFF, so other files leave gaps in the numbers.
 
 ## Right-click menu
 
