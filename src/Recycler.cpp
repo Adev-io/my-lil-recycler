@@ -2,8 +2,9 @@
 // Author: Ari Klopfer / A_Development. MIT
 //
 // Threads. Audio (process): Transport, each stem's playing buffer (cur) and fading-out buffer (old), outputs, lights. It never
-// allocates, locks or touches the library; it talks to the worker only through atomics: pickRequest / dropMask bits (in DECK
-// mode pickRequest bits 4..7 mean "previous"), the loadRequest / retargetRequest / deckStartRequest flags, the published
+// allocates, locks or touches the library; it talks to the worker only through atomics: pickRequest / dropMask bits (normal
+// mode), deckSteps[4] (DECK: audio adds a signed step count per slot, the worker drains it), the loadRequest /
+// retargetRequest / deckStartRequest flags, the published
 // target (pub*), landed[4] (the gen of each buffer it swaps in; the UI reads it), deck (UI writes; all read it), and per slot
 // the pending / retired buffer hand-over (std::atomic<Buf*>: whoever exchanges a pointer out owns it). Worker (run): owns the
 // library, the pick history and the scan; runs Scan / Render / Clear / Forget jobs from a deque (renders in front, scans at
@@ -161,6 +162,7 @@ struct Recycler : Module
     std::atomic<bool> pubMinor { true };
     std::atomic<bool> deck { false }, deckStartRequest { false };
     std::atomic<uint32_t> landed[4];   // written by the audio thread: the gen of the buffer each slot plays
+    std::atomic<int> deckSteps[4];     // DECK: presses since the worker last drained it (+ next, - previous)
 
     std::mutex stateMutex;   // UI + worker
     std::string folder;
@@ -176,6 +178,8 @@ struct Recycler : Module
     std::string scanFolder, historyFolder;
     int unsaved = 0;
     uint32_t nextGen = 0;
+    bool deckWas = false;      // the last retarget saw DECK on (or a DECK load ran): leaving it drops the DRUMS shift
+    bool deckRestart = false;  // DECK started during a scan: the crate is partial, so the scan's end starts it again
 
     // ---- audio thread only
     rc::Transport transport;
@@ -224,7 +228,7 @@ struct Recycler : Module
         configLight (RUN_LIGHT, "Running");
         configLight (RENDER_LIGHT, "Rendering (blinks while stems are being stretched)");
         paramQuantities[RUN_PARAM]->randomizeEnabled = false;
-        for (int i = 0; i < 4; ++i) { pending[i].store (nullptr); retired[i].store (nullptr); landed[i].store (0); }
+        for (int i = 0; i < 4; ++i) { pending[i].store (nullptr); retired[i].store (nullptr); landed[i].store (0); deckSteps[i].store (0); }
         seed = random::u32() | 1u;
         lightDiv.setDivision (64);
         worker = std::thread ([this] { run(); });
@@ -465,15 +469,21 @@ struct Recycler : Module
         s.s = c.s;
         s.deckPos = pos;
         s.deckN = (int) ord.size();
+        deckWas = true;
         if (++nextGen == 0) ++nextGen;   // 0 means "never stepped" (landed starts there)
         s.gen = nextGen;
         { std::lock_guard<std::mutex> lk (stateMutex); slots[j] = s; }
         postRender (j, s, t, pubRate.load());
     }
 
-    // DECK: bits 0..3 step slot n to the next crate file, bits 4..7 to the previous one (both at once cancel)
-    void deckPick (uint32_t mask)
+    // DECK: each slot's drained presses (+ next, - previous) step it through the crate; one render per slot that moved
+    void deckPick()
     {
+        if (! deck.load()) return;
+        int want[4];
+        bool any = false;
+        for (int j = 0; j < 4; ++j) { want[j] = deckSteps[j].exchange (0); any = any || want[j] != 0; }
+        if (! any) return;
         rc::library::Library pool;
         folderLib (pool);
         const std::vector<int> ord = rc::deck::order (pool);
@@ -481,17 +491,24 @@ struct Recycler : Module
         if (n == 0) return;
         for (int j = 0; j < 4; ++j)
         {
-            const int dir = (int) (mask >> j & 1u) - (int) (mask >> (j + 4) & 1u);
-            if (dir == 0) continue;
+            if (want[j] == 0) continue;
             std::string path;
             { std::lock_guard<std::mutex> lk (stateMutex); path = slots[j].path; }
-            deckLoad (j, pool, ord, rc::deck::step (rc::deck::positionOf (pool, ord, path), dir, n));
+            const int dir = want[j] > 0 ? 1 : -1;
+            int count = want[j] > 0 ? want[j] : -want[j];
+            int pos = rc::deck::positionOf (pool, ord, path);
+            if (pos < 0) { pos = rc::deck::step (pos, dir, n); --count; }   // off the crate: the first step lands on the first / last file
+            count %= n;   // n steps round the crate: back where it was
+            for (int c = 0; c < count; ++c) pos = rc::deck::step (pos, dir, n);
+            deckLoad (j, pool, ord, pos);
         }
     }
 
     // DECK switched on, or a scan ended with every slot empty in DECK mode: slot n takes crate file n
     void deckStart()
     {
+        if (! deck.load()) return;
+        deckRestart = scanning.load();   // a scan in progress: its crate is partial, so the scan's end starts again
         rc::library::Library pool;
         folderLib (pool);
         const std::vector<int> ord = rc::deck::order (pool);
@@ -514,6 +531,14 @@ struct Recycler : Module
 
     void retarget()
     {
+        const bool d = deck.load();
+        if (! d && deckWas)
+        {
+            // left DECK: the picker never keys the DRUMS slot; drop the shift DECK gave it
+            std::lock_guard<std::mutex> lk (stateMutex);
+            slots[rc::DRUMS].s = 0;
+        }
+        deckWas = d;
         const rc::picker::Target t = target();
         const int rate = pubRate.load();
         for (int i = 0; i < 4; ++i)
@@ -682,14 +707,15 @@ struct Recycler : Module
         scanning = false;
         if (! finished) return;
         resolve (true);
-        deckIndex();
+        if (deck.load()) deckIndex();
         bool empty = true;
         {
             std::lock_guard<std::mutex> lk (stateMutex);
             for (int i = 0; i < 4; ++i) empty = empty && slots[i].path.empty();
             empty = empty && ! folder.empty();
         }
-        if (empty)
+        if (deck.load() && deckRestart) deckStart();
+        else if (empty)
         {
             if (deck.load()) deckStart();
             else pick (0xF);
@@ -752,9 +778,9 @@ struct Recycler : Module
                 if (deckStartRequest.exchange (false)) deckStart();
                 if (const uint32_t r = pickRequest.exchange (0))
                 {
-                    if (deck.load()) deckPick (r);
-                    else if (r & 0xFu) pick (r & 0xFu);
+                    if (! deck.load() && (r & 0xFu)) pick (r & 0xFu);
                 }
+                deckPick();
                 if (retargetRequest.exchange (false)) retarget();
             }
             catch (const std::exception& e) { WARN ("Recycler: worker request: %s", e.what()); }
@@ -813,20 +839,15 @@ struct Recycler : Module
         post (j, true);
     }
 
-    // the menu's Deck mode. LOCK becomes a previous button, so every latch starts released. Switching off drops the DRUMS
-    // slot's key shift (the picker never keys it; DECK may have shifted it) and re-renders every slot by its role.
+    // the menu's Deck mode. LOCK becomes a previous button, so every latch starts released, and presses counted for the
+    // old mode are dropped. Switching off re-renders every slot by its role (the worker drops the DRUMS shift DECK gave it).
     void setDeck (bool on)
     {
         if (on == deck.load()) return;
-        for (int i = 0; i < 4; ++i) params[LOCK_PARAM + i].setValue (0.f);
+        for (int i = 0; i < 4; ++i) { params[LOCK_PARAM + i].setValue (0.f); deckSteps[i].store (0); }
         deck = on;
         if (on) deckStartRequest = true;
-        else
-        {
-            // the picker never keys the DRUMS slot; drop the shift DECK gave it
-            { std::lock_guard<std::mutex> lk (stateMutex); slots[rc::DRUMS].s = 0; }
-            retargetRequest = true;
-        }
+        else retargetRequest = true;
     }
 
     void onReset (const ResetEvent& e) override
@@ -924,11 +945,15 @@ struct Recycler : Module
         {
             const bool b = rollBtn[i].process (params[ROLL_PARAM + i].getValue() > 0.f);
             const bool t = rollTrig[i].process (inputs[ROLL_INPUT + i].getVoltage(), 0.1f, 1.f);
-            if (b || t) req |= 1u << i;
+            if (b || t)
+            {
+                if (deckOn) deckSteps[i].fetch_add (1);   // DECK: each press is a step (pickRequest bits would coalesce)
+                else req |= 1u << i;
+            }
             if (deckOn && params[LOCK_PARAM + i].getValue() > 0.5f)   // DECK: LOCK is a previous button; the latch springs back
             {
                 params[LOCK_PARAM + i].setValue (0.f);
-                req |= 1u << (i + 4);
+                deckSteps[i].fetch_sub (1);
             }
         }
         const bool bb = batchBtn.process (params[BATCH_PARAM].getValue() > 0.f);
@@ -1117,6 +1142,7 @@ struct Recycler : Module
         bool deckJson = false;
         if (flag (root, "deck", b)) deckJson = b;
         deck = deckJson;   // patches from 2.0.0 have no key: off
+        if (deckJson) for (int i = 0; i < 4; ++i) params[LOCK_PARAM + i].setValue (0.f);   // a deck patch never fires a previous step
         if (number (root, "bpm", v)) params[BPM_PARAM].setValue ((float) clampD (v, 40.0, 240.0));
         if (number (root, "root", v)) params[ROOT_PARAM].setValue ((float) std::round (clampD (v, 0.0, 11.0)));
         if (flag (root, "minor", b)) params[MODE_PARAM].setValue (b ? 1.f : 0.f);
