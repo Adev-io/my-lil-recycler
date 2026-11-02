@@ -380,6 +380,7 @@ struct Recycler : Module
             loaded = rc::library::load (cachePath(), fresh);
         }
         if (loaded) { lib.files.swap (fresh.files); history = rc::picker::History(); }
+        deckWas = deck.load();   // a patch load sets the mode directly; no transition to undo
         seeder = rc::picker::Rng (seed.load());
         std::string f;
         uint32_t empty = 0;
