@@ -1007,14 +1007,11 @@ struct Recycler : Module
                 retired[i].store (st.old);
                 st.old = nullptr;
             }
-            if (drop >> i & 1)
+            if ((drop >> i & 1) && ! st.old)
             {
-                if (! st.old)
-                {
-                    if (st.cur) fadeOut (st, st.cur, fadeSwap);
-                    st.cur = nullptr;
-                    dropMask.fetch_and (~(1u << i));
-                }
+                if (st.cur) fadeOut (st, st.cur, fadeSwap);
+                st.cur = nullptr;
+                dropMask.fetch_and (~(1u << i));
             }
             else if (! st.old && pending[i].load (std::memory_order_relaxed) && (wrapped || ! running || ! st.cur))
             {
