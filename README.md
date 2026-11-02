@@ -41,8 +41,8 @@ Four rows: **DRUMS**, **BASS**, **MELODY**, **TEXTURE**.
 |---|---|
 | **ROLL** button / jack | A new file for that slot. The trigger works too. |
 | **LOCK** | Keeps the slot's file when you BATCH. The light is lime while locked. |
-| **LEVEL** | Stem volume. |
-| **OUT L / R** | The stem on its own, ±5 V. L carries the mono sum while R is unpatched. |
+| **LEVEL** | Stem volume, up to +6 dB. More per-slot controls: see [Shaping each slot](#shaping-each-slot). |
+| **OUT L / R** | The stem on its own: about ±5 V at 0 dB, up to about ±10 V at +6 dB. L carries the mono sum while R is unpatched. |
 
 A new file comes in on the next loop start, with a short crossfade. The name beside each role: white = playing,
 magenta = missing (the file is gone, or could not be read or rendered; the slot goes silent), dim dash = empty.
@@ -54,7 +54,7 @@ magenta = missing (the file is gone, or could not be read or rendered; the slot 
 | **BATCH** button / jack | Re-rolls every unlocked stem at once. No file appears twice in a combo. |
 | **CHAOS** | Low: only close tempo and key fits, the best-fitting files. High: wider stretch and pitch shift, any file that fits the role at all. |
 | **CV** | Chaos CV, 0 to 10 V adds 0 to 100 %. |
-| **MIX L / R** | Half the sum of the four stems. L carries the mono sum while MIX R is unpatched. |
+| **MIX L / R** | Half the sum of the four stems, so it can go past ±10 V with several stems hot. L carries the mono sum while MIX R is unpatched. |
 
 ## File names help
 
@@ -63,10 +63,10 @@ A tempo in the name, like `120bpm` or `90 BPM`, is trusted as the file's tempo. 
 
 ## Saving
 
-The patch stores the folder, the settings, the four file paths, the locks and the levels. On reopen the module
-reloads the cache, renders the four stems again and rescans the folder. A saved file that is gone (or not in the
-cache) shows magenta and stays silent; a later scan that finds it brings it back. A patch saved mid-scan keeps what
-was analysed so far.
+The patch stores the folder, the settings, the four file paths, the locks, the levels and the shaping (pitch,
+filter, pan, start, reverse). On reopen the module reloads the cache, renders the four stems again and rescans
+the folder. A saved file that is gone (or not in the cache) shows magenta and stays silent; a later scan that finds
+it brings it back. A patch saved mid-scan keeps what was analysed so far.
 
 ## Formats
 

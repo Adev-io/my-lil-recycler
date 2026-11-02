@@ -3,8 +3,8 @@
 //
 // Threads. Audio (process): Transport, each stem's playing buffer (cur) and fading-out buffer (old), outputs, lights. It never
 // allocates, locks or touches the library; it talks to the worker only through atomics: pickRequest / dropMask bits (normal
-// mode), deckSteps[4] (DECK: audio adds a signed step count per slot, the worker drains it), the loadRequest /
-// retargetRequest / deckStartRequest flags, the published
+// mode), pitchMask bits (slots whose PITCH changed; the worker re-renders just those), deckSteps[4] (DECK: audio adds a
+// signed step count per slot, the worker drains it), the loadRequest / retargetRequest / deckStartRequest flags, the published
 // target (pub*), landed[4] (the gen of each buffer it swaps in; the UI reads it), deck (UI writes; all read it), and per slot
 // the pending / retired buffer hand-over (std::atomic<Buf*>: whoever exchanges a pointer out owns it). Worker (run): owns the
 // library, the pick history and the scan; runs Scan / Render / Clear / Forget jobs from a deque (renders in front, scans at
@@ -940,12 +940,22 @@ struct Recycler : Module
         pubRate = t.rate;
     }
 
-    // cur (read at frame lastIdx last sample) becomes old and fades out from the next frame on; null: a fade-in from silence
+    // cur (read at frame lastIdx last sample) becomes old and fades out from the next frame on; null: a fade-in from silence.
+    // Call it while from is still cur. Landing in the first half of a jump declick, the pre-jump head is the louder one:
+    // that head fades out instead.
     static void fadeOut (Stem& st, Buf* from, int len)
     {
         st.old = from;
-        st.oldPos = from && from->a.frames() ? rc::shape::stepIndex (st.lastIdx, from->a.frames(), st.rev) : 0;
-        st.oldRev = st.rev;
+        if (from && from == st.cur && st.jumpLeft > 0 && 2 * st.jumpLeft >= st.jumpLen)
+        {
+            st.oldPos = st.jumpPos;
+            st.oldRev = st.jumpRev;
+        }
+        else
+        {
+            st.oldPos = from && from->a.frames() ? rc::shape::stepIndex (st.lastIdx, from->a.frames(), st.rev) : 0;
+            st.oldRev = st.rev;
+        }
         st.fadeLeft = st.fadeLen = std::max (1, len);
         st.jumpLeft = 0;   // cur changes: its pre-jump head means nothing now
     }
@@ -1044,10 +1054,10 @@ struct Recycler : Module
             }
             else if (! st.old && pending[i].load (std::memory_order_relaxed) && (wrapped || ! running || ! st.cur))
             {
-                Buf* prev = st.cur;
-                st.cur = pending[i].exchange (nullptr);
+                Buf* next = pending[i].exchange (nullptr);
+                fadeOut (st, st.cur, fadeSwap);   // no cur: fade in from silence
+                st.cur = next;
                 if (st.cur) landed[i].store (st.cur->gen, std::memory_order_relaxed);
-                fadeOut (st, prev, fadeSwap);   // no prev: fade in from silence
             }
             else if ((jumped || shapeJump) && st.cur && st.cur->a.frames())
             {
@@ -1096,7 +1106,7 @@ struct Recycler : Module
                 --st.fadeLeft;
             }
 
-            if (! st.cur && st.fadeLeft == 0) st.svf.reset();   // silent (not mid drop-fade): the next stem starts clean
+            if (! st.cur && st.fadeLeft == 0 && st.svf.quiet()) st.svf.reset();   // silent, tail decayed: the next stem starts clean
             st.filt += (params[FILTER_PARAM + i].getValue() - st.filt) * filtCoef;
             rc::shape::filter (st.svf, st.filt, sr, l, r);
             float gl = 1.f, gr = 1.f;

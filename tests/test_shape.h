@@ -127,6 +127,23 @@ inline void testShape()
         }
         check (finite, "shape: a NaN sample does not stick in the filter state");
     }
+    {
+        // quiet: a low-pass tail keeps ringing after its input stops; the slot only resets the filter once it has decayed
+        Svf s;
+        check (s.quiet(), "shape: a fresh filter is quiet");
+        for (int i = 0; i < 4800; ++i)
+        {
+            float l = (float) std::sin (2.0 * 3.14159265358979 * 50.0 * i / 48000.0), r = -l;
+            filter (s, -1.f, 48000.f, l, r);
+        }
+        check (! s.quiet(), "shape: a full low-pass after a burst is not quiet");
+        for (int i = 0; i < 48000; ++i)
+        {
+            float l = 0.f, r = 0.f;
+            filter (s, -1.f, 48000.f, l, r);
+        }
+        check (s.quiet(), "shape: a full low-pass tail is quiet after 1 s of zeros");
+    }
     check (std::fabs (cutoffFor (-1.f) - 20.f) < 0.01f, "shape: full low-pass cutoff is 20 Hz", cutoffFor (-1.f));
     check (std::fabs (cutoffFor (1.f) - 20000.f) < 1.f, "shape: full high-pass cutoff is 20 kHz", cutoffFor (1.f));
 

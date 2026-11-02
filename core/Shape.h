@@ -45,6 +45,8 @@ struct Svf
     float ic1[2] = { 0.f, 0.f }, ic2[2] = { 0.f, 0.f };
     bool on = false;   // false: the next active sample primes the state
     void reset() { ic1[0] = ic1[1] = ic2[0] = ic2[1] = 0.f; on = false; }
+    // true once the state has decayed (a tail fed zeros dies away): resetting then makes no step
+    bool quiet() const { return std::fabs (ic1[0]) + std::fabs (ic1[1]) + std::fabs (ic2[0]) + std::fabs (ic2[1]) < 1e-5f; }
 };
 
 // One stereo sample at knob f (-1 .. 1). The dead zone passes l, r untouched and clears the state; leaving it into
