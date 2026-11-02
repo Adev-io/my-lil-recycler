@@ -498,9 +498,11 @@ struct Recycler : Module
             const int dir = want[j] > 0 ? 1 : -1;
             int count = want[j] > 0 ? want[j] : -want[j];
             int pos = rc::deck::positionOf (pool, ord, path);
+            const int oldPos = pos;
             if (pos < 0) { pos = rc::deck::step (pos, dir, n); --count; }   // off the crate: the first step lands on the first / last file
             count %= n;   // n steps round the crate: back where it was
             for (int c = 0; c < count; ++c) pos = rc::deck::step (pos, dir, n);
+            if (pos == oldPos) continue;   // a full lap lands on the same file: no new gen, no re-render
             deckLoad (j, pool, ord, pos);
         }
     }
@@ -1143,6 +1145,7 @@ struct Recycler : Module
         bool deckJson = false;
         if (flag (root, "deck", b)) deckJson = b;
         deck = deckJson;   // patches from 2.0.0 have no key: off
+        for (int i = 0; i < 4; ++i) deckSteps[i].store (0);   // presses counted before a load never apply after it
         if (deckJson) for (int i = 0; i < 4; ++i) params[LOCK_PARAM + i].setValue (0.f);   // a deck patch never fires a previous step
         if (number (root, "bpm", v)) params[BPM_PARAM].setValue ((float) clampD (v, 40.0, 240.0));
         if (number (root, "root", v)) params[ROOT_PARAM].setValue ((float) std::round (clampD (v, 0.0, 11.0)));
@@ -1281,16 +1284,28 @@ struct NameBox : TransparentWidget
         if (layer == 1 && boxFont (a.vg, 9.5f))
         {
             std::string path;
-            bool missing = false;
+            bool missing = false, cued = false, deckOn = false;
+            int pos = -1, n = 0;
             if (m)
             {
                 std::lock_guard<std::mutex> lk (m->stateMutex);
                 path = m->slots[slot].path;
                 missing = m->slots[slot].missing;
+                pos = m->slots[slot].deckPos;
+                n = m->slots[slot].deckN;
+                const uint32_t gen = m->slots[slot].gen;
+                cued = gen != 0 && gen != m->landed[slot].load (std::memory_order_relaxed);
+                deckOn = m->deck.load();
             }
             const float x = px (16.f), w = box.size.x - x - px (1.f);
             if (path.empty()) line (a.vg, "\xE2\x80\x94", x, box.size.y / 2, cDim());
-            else line (a.vg, fitMiddle (a.vg, system::getFilename (path), w), x, box.size.y / 2, missing ? cMagenta() : cWhite());
+            else
+            {
+                std::string label = system::getFilename (path);
+                if (deckOn && pos >= 0) label = string::f ("%02d/%02d ", pos + 1, n) + label;   // 03/12 name
+                if (deckOn && cued && ! missing) label = "\xE2\x80\xBA " + label;              // > cued: lands on the loop end
+                line (a.vg, fitMiddle (a.vg, label, w), x, box.size.y / 2, missing ? cMagenta() : cWhite());
+            }
         }
         TransparentWidget::drawLayer (a, layer);
     }
