@@ -474,6 +474,7 @@ struct Recycler : Module
         if (++nextGen == 0) ++nextGen;   // 0 means "never stepped" (landed starts there)
         s.gen = nextGen;
         { std::lock_guard<std::mutex> lk (stateMutex); slots[j] = s; }
+        delete pending[j].exchange (nullptr);   // a rendered but unplayed older step must not land at the wrap
         postRender (j, s, t, pubRate.load());
     }
 
@@ -701,6 +702,7 @@ struct Recycler : Module
     // slot empty pick a first combo
     void endScan (bool finished)
     {
+        const bool restart = deckRestart; deckRestart = false;   // DECK started during this scan
         if (finished)
         {
             std::set<std::string> found;
@@ -724,7 +726,7 @@ struct Recycler : Module
             for (int i = 0; i < 4; ++i) empty = empty && slots[i].path.empty();
             empty = empty && ! folder.empty();
         }
-        if (deck.load() && deckRestart) deckStart();
+        if (deck.load() && restart) deckStart();
         else if (empty)
         {
             if (deck.load()) deckStart();
