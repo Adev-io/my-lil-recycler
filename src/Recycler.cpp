@@ -170,6 +170,8 @@ struct Recycler : Module
     std::atomic<bool> deck { false }, deckStartRequest { false };
     std::atomic<uint32_t> landed[4];   // written by the audio thread: the gen of the buffer each slot plays
     std::atomic<int> deckSteps[4];     // DECK: presses since the worker last drained it (+ next, - previous)
+    std::atomic<int> pubPitch[4];          // PITCH per slot in semitones, published by the audio thread after a 0.2 s settle
+    std::atomic<uint32_t> pitchMask { 0 }; // slots whose PITCH changed: the worker re-renders just those
 
     std::mutex stateMutex;   // UI + worker
     std::string folder;
@@ -193,6 +195,8 @@ struct Recycler : Module
     Stem stems[4];
     Tgt seen, applied;
     float debounce = 0.f, runGain = 0.f, blinkTime = 0.f;
+    int pitchSeen[4] = { 0, 0, 0, 0 }, pitchApplied[4] = { 0, 0, 0, 0 };
+    float pitchDebounce[4] = { 0.f, 0.f, 0.f, 0.f };
     dsp::BooleanTrigger rollBtn[4], batchBtn;
     dsp::SchmittTrigger rollTrig[4], batchTrig, clockTrig, resetTrig;
     dsp::ClockDivider lightDiv;
@@ -241,7 +245,7 @@ struct Recycler : Module
         configLight (RUN_LIGHT, "Running");
         configLight (RENDER_LIGHT, "Rendering (blinks while stems are being stretched)");
         paramQuantities[RUN_PARAM]->randomizeEnabled = false;
-        for (int i = 0; i < 4; ++i) { pending[i].store (nullptr); retired[i].store (nullptr); landed[i].store (0); deckSteps[i].store (0); }
+        for (int i = 0; i < 4; ++i) { pending[i].store (nullptr); retired[i].store (nullptr); landed[i].store (0); deckSteps[i].store (0); pubPitch[i].store (0); }
         seed = random::u32() | 1u;
         lightDiv.setDivision (64);
         worker = std::thread ([this] { run(); });
@@ -327,7 +331,7 @@ struct Recycler : Module
         j.path = s.path;
         j.info = s.info;
         j.choice.k = s.k;
-        j.choice.s = s.s;
+        j.choice.s = s.s + pubPitch[slot].load();   // key lock + the slot's PITCH; SlotState::s stays the key-lock shift
         j.target = t;
         j.outRate = rate;
         post (j, true);
@@ -578,6 +582,24 @@ struct Recycler : Module
         }
     }
 
+    // PITCH moved on these slots: re-render them with the same file and fit (the new render swaps on the loop end)
+    void repitch (uint32_t mask)
+    {
+        const rc::picker::Target t = target();
+        const int rate = pubRate.load();
+        for (int i = 0; i < 4; ++i)
+        {
+            if (! (mask >> i & 1u)) continue;
+            SlotState s;
+            {
+                std::lock_guard<std::mutex> lk (stateMutex);
+                if (slots[i].path.empty() || ! slots[i].hasInfo || slots[i].missing) continue;
+                s = slots[i];
+            }
+            postRender (i, s, t, rate);
+        }
+    }
+
     void render (const Job& j)
     {
         Buf* buf = nullptr;
@@ -807,6 +829,7 @@ struct Recycler : Module
                 }
                 deckPick();
                 if (retargetRequest.exchange (false)) retarget();
+                if (const uint32_t m = pitchMask.exchange (0)) repitch (m);
             }
             catch (const std::exception& e) { WARN ("Recycler: worker request: %s", e.what()); }
             try
@@ -962,6 +985,12 @@ struct Recycler : Module
             publish (applied);
             debounce = 0.f;
             pubChaos = clamp (params[CHAOS_PARAM].getValue() + finite0 (inputs[CHAOS_INPUT].getVoltage()) / 10.f, 0.f, 1.f);
+            for (int i = 0; i < 4; ++i)
+            {
+                pitchSeen[i] = pitchApplied[i] = (int) std::lround (params[PITCH_PARAM + i].getValue());
+                pitchDebounce[i] = 0.f;
+                pubPitch[i].store (pitchApplied[i]);
+            }
             loadRequest = true;
         }
 
@@ -1102,6 +1131,21 @@ struct Recycler : Module
                 applied = seen;
                 publish (applied);
                 retargetRequest = true;
+            }
+        }
+        for (int i = 0; i < 4; ++i)
+        {
+            const int p = (int) std::lround (params[PITCH_PARAM + i].getValue());
+            if (p != pitchSeen[i]) { pitchSeen[i] = p; pitchDebounce[i] = 0.2f; }
+            else if (pitchDebounce[i] > 0.f)
+            {
+                pitchDebounce[i] -= dt;
+                if (pitchDebounce[i] <= 0.f && p != pitchApplied[i])
+                {
+                    pitchApplied[i] = p;
+                    pubPitch[i].store (p);
+                    pitchMask.fetch_or (1u << i);
+                }
             }
         }
         pubChaos = clamp (params[CHAOS_PARAM].getValue() + finite0 (inputs[CHAOS_INPUT].getVoltage()) / 10.f, 0.f, 1.f);
