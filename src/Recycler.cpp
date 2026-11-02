@@ -1456,6 +1456,22 @@ struct RecyclerWidget : ModuleWidget
             addParam (createParamCentered<VCVLatch> (at (L::LOCK_PARAM[i]), module, Recycler::LOCK_PARAM + i));
             addChild (createLightCentered<SmallLight<LimeLight>> (at (L::LOCK_LIGHT[i]), module, Recycler::LOCK_LIGHT + i));
             addParam (createParamCentered<RoundSmallBlackKnob> (at (L::LEVEL_PARAM[i]), module, Recycler::LEVEL_PARAM + i));
+            {
+                RoundSmallBlackKnob* k = createParamCentered<RoundSmallBlackKnob> (at (L::PITCH_PARAM[i]), module, Recycler::PITCH_PARAM + i);
+                k->smooth = false;
+                addParam (k);
+            }
+            addParam (createParamCentered<RoundSmallBlackKnob> (at (L::FILTER_PARAM[i]), module, Recycler::FILTER_PARAM + i));
+            addParam (createParamCentered<RoundSmallBlackKnob> (at (L::PAN_PARAM[i]), module, Recycler::PAN_PARAM + i));
+            {
+                // START and PITCH are snapped: an unsmoothed knob steps at UI rate, so each START declick (5 ms) finishes
+                // before the next step instead of chaining into a stutter while the knob is turned
+                RoundSmallBlackKnob* k = createParamCentered<RoundSmallBlackKnob> (at (L::START_PARAM[i]), module, Recycler::START_PARAM + i);
+                k->smooth = false;
+                addParam (k);
+            }
+            addParam (createParamCentered<VCVLatch> (at (L::REV_PARAM[i]), module, Recycler::REV_PARAM + i));
+            addChild (createLightCentered<SmallLight<LimeLight>> (at (L::REV_LIGHT[i]), module, Recycler::REV_LIGHT + i));
             addInput (createInputCentered<PJ301MPort> (at (L::ROLL_INPUT[i]), module, Recycler::ROLL_INPUT + i));
             addOutput (createOutputCentered<PJ301MPort> (at (L::OUT_L_OUTPUT[i]), module, Recycler::OUT_L_OUTPUT + i));
             addOutput (createOutputCentered<PJ301MPort> (at (L::OUT_R_OUTPUT[i]), module, Recycler::OUT_R_OUTPUT + i));

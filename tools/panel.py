@@ -13,7 +13,7 @@ from fontTools.pens.svgPathPen import SVGPathPen
 from fontTools.pens.transformPen import TransformPen
 
 H = 128.5
-W = 5.08 * 26
+W = 5.08 * 36
 BAND = 8.6
 INK, INK2 = '#16161a', '#202027'
 LIME, MAGENTA, BLUE, WHITE, DIM = '#c8ff3a', '#ff3d9a', '#5ac8e6', '#f2f2f4', '#8d8d96'
@@ -85,7 +85,7 @@ ROW_LIB, ROW_LOCK, ROW_JACK = 18.0, 34.0, 49.0   # jacks 1 mm up from 50: their 
 STEM_Y = [63.6 + 13.0 * i for i in range(4)]   # from 64: row 3's L / R labels keep the same 0.6 mm to the MIX plates as every row
 ROW_COMBO = 115.6   # up from 118: MIX R's label clears the bottom-right screw, MIX pads clear the row-3 labels
 ROLES = ('DRUMS', 'BASS', 'MELODY', 'TEXTURE')
-OUT_LX, OUT_RX = 115.0, 124.7   # from 116 / 126: the R plate stays inside the jack zone's 2.5 mm margin
+OUT_LX, OUT_RX = 165.8, 175.5   # 10 HP right of 2.1's 115.0 / 124.7: the R plate keeps the 2.5 mm zone margin
 ZONE_X, ZONE_Y, ZONE_B = 2.5, 57.0, 126.0
 SEP_Y = 57.0
 CAPTION_X, CAPTION_SIZE = 5.0, 2.2
@@ -98,7 +98,7 @@ NAME_BOX = [(4.0, y - 3.0, 54.0, 6.0) for y in STEM_Y]
 # (name, kind, x, y, label). A name ending in '+i' is stem i of a per-stem array.
 RECYCLER = [
     ('FOLDER_PARAM', 'button', 10.0, ROW_LIB, 'FOLDER'),
-    ('LIB_LIGHT', 'light', 122.0, ROW_LIB, ''),
+    ('LIB_LIGHT', 'light', 172.8, ROW_LIB, ''),
     ('BPM_PARAM', 'knob', 14.0, ROW_LOCK, 'BPM'), ('ROOT_PARAM', 'knob', 34.0, ROW_LOCK, 'ROOT'),
     ('MODE_PARAM', 'button', 52.0, ROW_LOCK, 'MODE'), ('BARS_PARAM', 'button', 66.0, ROW_LOCK, 'BARS'),
     ('RUN_PARAM', 'button', 82.0, ROW_LOCK, 'RUN'), ('RUN_LIGHT', 'light', 88.0, 29.0, ''),
@@ -109,7 +109,13 @@ RECYCLER = [
     ('LOCK_PARAM+%d' % i, 'button', 76.0, y, 'LOCK'),
     ('LOCK_LIGHT+%d' % i, 'light', 80.5, y - 4.0, ''),
     ('LEVEL_PARAM+%d' % i, 'small', 90.0, y, 'LEVEL'),
-    ('ROLL_INPUT+%d' % i, 'seq', 104.0, y, 'ROLL'),
+    ('PITCH_PARAM+%d' % i, 'small', 101.0, y, 'PITCH'),
+    ('FILTER_PARAM+%d' % i, 'small', 111.0, y, 'FILT'),
+    ('PAN_PARAM+%d' % i, 'small', 121.0, y, 'PAN'),
+    ('START_PARAM+%d' % i, 'small', 131.0, y, 'START'),
+    ('REV_PARAM+%d' % i, 'button', 141.0, y, 'REV'),
+    ('REV_LIGHT+%d' % i, 'light', 145.5, y - 4.0, ''),
+    ('ROLL_INPUT+%d' % i, 'seq', 154.8, y, 'ROLL'),
     ('OUT_L_OUTPUT+%d' % i, 'out', OUT_LX, y, 'L'),
     ('OUT_R_OUTPUT+%d' % i, 'out', OUT_RX, y, 'R'),
 )] + [

@@ -3,7 +3,7 @@
 namespace layout {
 namespace recycler {
 constexpr float FOLDER_PARAM[2] = {10.00f, 18.00f};
-constexpr float LIB_LIGHT[2] = {122.00f, 18.00f};
+constexpr float LIB_LIGHT[2] = {172.80f, 18.00f};
 constexpr float BPM_PARAM[2] = {14.00f, 34.00f};
 constexpr float ROOT_PARAM[2] = {34.00f, 34.00f};
 constexpr float MODE_PARAM[2] = {52.00f, 34.00f};
@@ -19,17 +19,23 @@ constexpr float BATCH_INPUT[2] = {26.00f, 115.60f};
 constexpr float CHAOS_PARAM[2] = {40.00f, 115.60f};
 constexpr float CHAOS_INPUT[2] = {56.00f, 115.60f};
 constexpr float RENDER_LIGHT[2] = {68.00f, 115.60f};
-constexpr float MIX_L_OUTPUT[2] = {115.00f, 115.60f};
-constexpr float MIX_R_OUTPUT[2] = {124.70f, 115.60f};
+constexpr float MIX_L_OUTPUT[2] = {165.80f, 115.60f};
+constexpr float MIX_R_OUTPUT[2] = {175.50f, 115.60f};
 constexpr float ROLL_PARAM[4][2] = {{66.00f, 63.60f}, {66.00f, 76.60f}, {66.00f, 89.60f}, {66.00f, 102.60f}};
 constexpr float LOCK_PARAM[4][2] = {{76.00f, 63.60f}, {76.00f, 76.60f}, {76.00f, 89.60f}, {76.00f, 102.60f}};
 constexpr float LOCK_LIGHT[4][2] = {{80.50f, 59.60f}, {80.50f, 72.60f}, {80.50f, 85.60f}, {80.50f, 98.60f}};
 constexpr float LEVEL_PARAM[4][2] = {{90.00f, 63.60f}, {90.00f, 76.60f}, {90.00f, 89.60f}, {90.00f, 102.60f}};
-constexpr float ROLL_INPUT[4][2] = {{104.00f, 63.60f}, {104.00f, 76.60f}, {104.00f, 89.60f}, {104.00f, 102.60f}};
-constexpr float OUT_L_OUTPUT[4][2] = {{115.00f, 63.60f}, {115.00f, 76.60f}, {115.00f, 89.60f}, {115.00f, 102.60f}};
-constexpr float OUT_R_OUTPUT[4][2] = {{124.70f, 63.60f}, {124.70f, 76.60f}, {124.70f, 89.60f}, {124.70f, 102.60f}};
+constexpr float PITCH_PARAM[4][2] = {{101.00f, 63.60f}, {101.00f, 76.60f}, {101.00f, 89.60f}, {101.00f, 102.60f}};
+constexpr float FILTER_PARAM[4][2] = {{111.00f, 63.60f}, {111.00f, 76.60f}, {111.00f, 89.60f}, {111.00f, 102.60f}};
+constexpr float PAN_PARAM[4][2] = {{121.00f, 63.60f}, {121.00f, 76.60f}, {121.00f, 89.60f}, {121.00f, 102.60f}};
+constexpr float START_PARAM[4][2] = {{131.00f, 63.60f}, {131.00f, 76.60f}, {131.00f, 89.60f}, {131.00f, 102.60f}};
+constexpr float REV_PARAM[4][2] = {{141.00f, 63.60f}, {141.00f, 76.60f}, {141.00f, 89.60f}, {141.00f, 102.60f}};
+constexpr float REV_LIGHT[4][2] = {{145.50f, 59.60f}, {145.50f, 72.60f}, {145.50f, 85.60f}, {145.50f, 98.60f}};
+constexpr float ROLL_INPUT[4][2] = {{154.80f, 63.60f}, {154.80f, 76.60f}, {154.80f, 89.60f}, {154.80f, 102.60f}};
+constexpr float OUT_L_OUTPUT[4][2] = {{165.80f, 63.60f}, {165.80f, 76.60f}, {165.80f, 89.60f}, {165.80f, 102.60f}};
+constexpr float OUT_R_OUTPUT[4][2] = {{175.50f, 63.60f}, {175.50f, 76.60f}, {175.50f, 89.60f}, {175.50f, 102.60f}};
 constexpr float PATH_BOX[4] = {16.00f, 14.50f, 100.00f, 7.00f};   // x, y, w, h
 constexpr float NAME_BOX[4][4] = {{4.00f, 60.60f, 54.00f, 6.00f}, {4.00f, 73.60f, 54.00f, 6.00f}, {4.00f, 86.60f, 54.00f, 6.00f}, {4.00f, 99.60f, 54.00f, 6.00f}};   // x, y, w, h
-constexpr float FACE[3] = {117.62f, 4.30f, 3.096f};   // mascot centre x, y, radius (TalkingFace)
+constexpr float FACE[3] = {168.42f, 4.30f, 3.096f};   // mascot centre x, y, radius (TalkingFace)
 }
 }
