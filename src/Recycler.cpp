@@ -23,6 +23,7 @@
 #include "Stretch.h"
 #include "Transport.h"
 #include "Deck.h"
+#include "View.h"
 #include <osdialog.h>
 #include <sys/stat.h>
 #include <algorithm>
@@ -40,7 +41,7 @@ namespace rc = recycler;
 typedef rc::stretch::Stereo Stereo;
 
 // A rendered stem and the loop length (bars) it was rendered for, so it plays at the right speed whatever BARS says now.
-struct Buf { Stereo a; int bars = 1; uint32_t gen = 0; };   // gen: the SlotState::gen it was rendered for
+struct Buf { Stereo a; int bars = 1; uint32_t gen = 0; uint32_t id = 0; };   // gen: the SlotState::gen it was rendered for; id: this render
 
 // Every Recycler in the process shares one cache file: saves and loads take turns (library::save writes one fixed .tmp).
 static std::mutex cacheMutex;
@@ -173,6 +174,18 @@ struct Recycler : Module
     std::atomic<int> deckSteps[4];     // DECK: presses since the worker last drained it (+ next, - previous)
     std::atomic<int> pubPitch[4];          // PITCH per slot in semitones, published by the audio thread after a 0.2 s settle
     std::atomic<uint32_t> pitchMask { 0 }; // slots whose PITCH changed: the worker re-renders just those
+    std::atomic<uint32_t> landedId[4];     // written by the audio thread: the Buf::id each slot plays (0: none)
+    std::atomic<float> pubHead[4];         // written by the audio thread: where in that Buf it plays, 0..1 before START / REV
+    std::atomic<int> titleMode { 0 };      // the next crate read sets the title: 1 when it is empty (a load), 2 always (a new folder)
+
+    // ---- the deck display (viewMutex: worker + UI): envelopes of recent renders, the crate's song map, its cover
+    struct Wave { uint32_t id = 0; std::string path; float pk[rc::view::BINS], rms[rc::view::BINS]; };
+    struct Block { std::string path, stem; int nn = 0, kind = 0; };
+    std::mutex viewMutex;
+    std::vector<Wave> waves[4];   // per slot, newest last: the playing one and the ones that may land next
+    std::vector<Block> crateMap;  // the folder's crate loops, by stem then NN
+    std::string cover;            // empty: no cover
+    uint32_t coverGen = 0;        // bumped on every crate read, so a cover file that appeared since is loaded again
 
     std::mutex stateMutex;   // UI + worker
     std::string folder;
@@ -189,6 +202,8 @@ struct Recycler : Module
     std::string scanFolder, historyFolder;
     int unsaved = 0;
     uint32_t nextGen = 0;
+    uint32_t nextId = 0;
+    rc::view::Crate crate;
     bool deckWas = false;      // the last retarget saw DECK on (or a DECK load ran): leaving it drops the DRUMS shift
     bool deckRestart = false;  // DECK started during a scan: the crate is partial, so the scan's end starts it again
 
@@ -247,7 +262,7 @@ struct Recycler : Module
         configLight (RUN_LIGHT, "Running");
         configLight (RENDER_LIGHT, "Rendering (blinks while stems are being stretched)");
         paramQuantities[RUN_PARAM]->randomizeEnabled = false;
-        for (int i = 0; i < 4; ++i) { pending[i].store (nullptr); retired[i].store (nullptr); landed[i].store (0); deckSteps[i].store (0); pubPitch[i].store (0); }
+        for (int i = 0; i < 4; ++i) { pending[i].store (nullptr); retired[i].store (nullptr); landed[i].store (0); deckSteps[i].store (0); pubPitch[i].store (0); landedId[i].store (0); pubHead[i].store (0.f); }
         seed = random::u32() | 1u;
         lightDiv.setDivision (64);
         worker = std::thread ([this] { run(); });
@@ -634,6 +649,8 @@ struct Recycler : Module
                         buf->a = std::move (out);
                         buf->bars = std::max (1, j.target.bars);
                         buf->gen = j.gen;
+                        if (++nextId == 0) ++nextId;
+                        buf->id = nextId;
                     }
                 }
             }
@@ -643,6 +660,13 @@ struct Recycler : Module
             WARN ("Recycler: render of %s failed: %s", j.path.c_str(), e.what());
             delete buf;
             buf = nullptr;
+        }
+        Wave w;
+        if (buf)
+        {
+            w.id = buf->id;
+            w.path = j.path;
+            rc::view::envelope (buf->a.l, buf->a.r, w.pk, w.rms);
         }
         bool current;
         {
@@ -654,6 +678,7 @@ struct Recycler : Module
         {
             delete retired[j.slot].exchange (nullptr);
             delete pending[j.slot].exchange (buf);   // an unplayed older render goes
+            addWave (j.slot, w);
         }
         else
         {
@@ -663,6 +688,61 @@ struct Recycler : Module
         --renders;
     }
 
+    // keeps the playing envelope and the newest three (a render can land between the read of landedId and the lock)
+    void addWave (int slot, const Wave& w)
+    {
+        const uint32_t playing = landedId[slot].load();
+        std::lock_guard<std::mutex> lk (viewMutex);
+        std::vector<Wave>& v = waves[slot];
+        v.push_back (w);
+        for (size_t i = 0; v.size() > 4 && i + 3 < v.size();)
+            if (v[i].id != playing) v.erase (v.begin() + (long) i);
+            else ++i;
+    }
+
+    // the folder's crate loops (<n>-<stem>-<NN>... names) with their section kind, crate.json first
+    void buildMap()
+    {
+        rc::library::Library pool;
+        folderLib (pool);
+        std::vector<Block> m;
+        for (size_t i = 0; i < pool.files.size(); ++i)
+        {
+            const rc::view::Name n = rc::view::parseName (system::getFilename (pool.files[i].path));
+            if (n.nn < 0) continue;
+            Block b;
+            b.path = pool.files[i].path;
+            b.stem = n.stem;
+            b.nn = n.nn;
+            b.kind = rc::view::sectionKind (rc::view::sectionFor (crate, n.nn, n.section));
+            m.push_back (b);
+        }
+        std::sort (m.begin(), m.end(), [] (const Block& a, const Block& b) { return a.stem != b.stem ? a.stem < b.stem : a.nn < b.nn; });
+        std::lock_guard<std::mutex> lk (viewMutex);
+        crateMap.swap (m);
+    }
+
+    // crate.json and the cover, then the song map. A new folder, or a patch loaded unnamed, takes the crate's title.
+    void readCrate (const std::string& f)
+    {
+        crate = rc::view::readCrate (f);
+        std::string c;
+        const std::string names[3] = { crate.cover, "cover.jpg", "cover.png" };
+        for (int i = 0; i < 3 && c.empty(); ++i)
+            if (! names[i].empty() && system::isFile (f + "/" + names[i])) c = f + "/" + names[i];
+        const int mode = titleMode.exchange (0);
+        {
+            std::lock_guard<std::mutex> lk (stateMutex);
+            if (mode == 2 || (mode == 1 && title.empty())) title = crate.title;   // a new crate without one: unnamed
+        }
+        {
+            std::lock_guard<std::mutex> lk (viewMutex);
+            cover = c;
+            ++coverGen;
+        }
+        buildMap();
+    }
+
     void startScan (const Job& j)
     {
         endScan (false);
@@ -670,6 +750,7 @@ struct Recycler : Module
         filesTotal = filesOk = filesSkipped = 0;
         scanCap = j.cap;
         scanFolder = j.folder;
+        readCrate (j.folder);
         folderMissing = ! system::isDirectory (j.folder);
         if (folderMissing) return;
         std::vector<std::string> all;
@@ -755,6 +836,7 @@ struct Recycler : Module
         scanPos = 0;
         scanning = false;
         if (! finished) return;
+        buildMap();
         resolve (true);
         if (deck.load()) deckIndex();
         bool empty = true;
@@ -784,6 +866,10 @@ struct Recycler : Module
         }
         for (int i = 0; i < 4; ++i) delete pending[i].exchange (nullptr);
         dropMask.fetch_or (0xF);
+        crate = rc::view::Crate();
+        std::lock_guard<std::mutex> lk (viewMutex);
+        crateMap.clear();
+        cover.clear();
     }
 
     void runJob (const Job& j)
@@ -864,6 +950,7 @@ struct Recycler : Module
 
     void setFolder (const std::string& f)
     {
+        titleMode = 2;   // a new crate names the deck
         { std::lock_guard<std::mutex> lk (stateMutex); folder = f; }
         hasFolder = ! f.empty();
         folderMissing = false;
@@ -903,7 +990,7 @@ struct Recycler : Module
     void onReset (const ResetEvent& e) override
     {
         Module::onReset (e);
-        { std::lock_guard<std::mutex> lk (stateMutex); folder.clear(); }
+        { std::lock_guard<std::mutex> lk (stateMutex); folder.clear(); title.clear(); }
         hasFolder = false;
         folderMissing = false;
         deck = false;
@@ -1052,6 +1139,7 @@ struct Recycler : Module
             {
                 if (st.cur) fadeOut (st, st.cur, fadeSwap);
                 st.cur = nullptr;
+                landedId[i].store (0, std::memory_order_relaxed);
                 dropMask.fetch_and (~(1u << i));
             }
             else if (! st.old && pending[i].load (std::memory_order_relaxed) && (wrapped || ! running || ! st.cur))
@@ -1060,6 +1148,7 @@ struct Recycler : Module
                 fadeOut (st, st.cur, fadeSwap);   // no cur: fade in from silence
                 st.cur = next;
                 if (st.cur) landed[i].store (st.cur->gen, std::memory_order_relaxed);
+                landedId[i].store (st.cur ? st.cur->id : 0, std::memory_order_relaxed);
             }
             else if ((jumped || shapeJump) && st.cur && st.cur->a.frames())
             {
@@ -1078,7 +1167,9 @@ struct Recycler : Module
             if (st.cur && st.cur->a.frames())
             {
                 const Stereo& c = st.cur->a;
-                const size_t idx = rc::shape::readIndex (frameAt (st.cur, phase, loopBars), c.frames(), st.start, st.rev);
+                const size_t fwd = frameAt (st.cur, phase, loopBars);
+                const size_t idx = rc::shape::readIndex (fwd, c.frames(), st.start, st.rev);
+                pubHead[i].store ((float) fwd / (float) c.frames(), std::memory_order_relaxed);
                 l = c.l[idx];
                 r = c.r[idx];
                 st.lastIdx = idx;
@@ -1288,8 +1379,11 @@ struct Recycler : Module
         }
         {
             std::lock_guard<std::mutex> lk (stateMutex);
+            // a different folder over a module that had one is a new crate: it names the deck unless the data names it anew
+            const bool newFolder = haveFolder && ! folder.empty() && normPath (f) != normPath (folder);
+            titleMode = newFolder && (t.empty() || t == title) ? 2 : t.empty() ? 1 : 0;
             if (haveFolder) folder = f;
-            title = t;   // a patch without the key (2.2.0 and older) loads unnamed
+            title = t;   // a patch without the key (2.2.0 and older) loads unnamed, then takes the crate's title
             if (arr) for (int i = 0; i < 4; ++i) slots[i] = s[i];
             hasFolder = ! folder.empty();
         }
@@ -1413,16 +1507,185 @@ struct NameBox : TransparentWidget
     }
 };
 
+// The crate's cover as one image per NanoVG context, loaded once per path (and crate read) and freed when it changes.
+// Read through rc::file so a non-ASCII path opens on Windows too.
+struct CoverCache
+{
+    std::string path;
+    uint32_t gen = 0;
+    std::vector<std::pair<NVGcontext*, int>> h;   // 0: unreadable, kept so it is not retried every frame
+
+    int get (NVGcontext* vg, const std::string& p, uint32_t g)
+    {
+        if (p != path || g != gen) { clear(); path = p; gen = g; }
+        if (path.empty()) return 0;
+        for (size_t i = 0; i < h.size(); ++i)
+            if (h[i].first == vg) return h[i].second;
+        std::vector<unsigned char> bytes;
+        if (std::FILE* f = rc::file::open (path, "rb"))
+        {
+            unsigned char b[65536];
+            size_t n;
+            while (bytes.size() < (32u << 20) && (n = std::fread (b, 1, sizeof b, f)) > 0) bytes.insert (bytes.end(), b, b + n);
+            std::fclose (f);
+        }
+        h.push_back (std::make_pair (vg, bytes.empty() ? 0 : nvgCreateImageMem (vg, 0, bytes.data(), (int) bytes.size())));
+        return h.back().second;
+    }
+    void drop (NVGcontext* vg)
+    {
+        for (size_t i = 0; i < h.size(); ++i)
+            if (h[i].first == vg) { if (h[i].second > 0) nvgDeleteImage (vg, h[i].second); h.erase (h.begin() + (long) i); return; }
+    }
+    void clear()
+    {
+        for (size_t i = 0; i < h.size(); ++i)
+            if (h[i].second > 0) nvgDeleteImage (h[i].first, h[i].second);
+        h.clear();
+    }
+};
+
+static NVGcolor sectionColor (int kind, float alpha)
+{
+    static const unsigned RGB[rc::view::KINDS] = {
+        0x55555f,   // NONE
+        0x5ac8e6,   // INTRO
+        0xc8ff3a,   // VERSE
+        0x3ad6a0,   // PRE
+        0xff3d9a,   // CHORUS
+        0xff9f3a,   // BRIDGE
+        0xffd23a,   // SOLO
+        0x9a8cff,   // BREAK
+        0x4a7cff,   // OUTRO
+        0xb8b8c4 }; // OTHER
+    const unsigned c = RGB[kind >= 0 && kind < rc::view::KINDS ? kind : 0];
+    return nvgRGBA ((unsigned char) (c >> 16), (unsigned char) (c >> 8 & 0xFF), (unsigned char) (c & 0xFF), (unsigned char) (alpha * 255.f));
+}
+
+// Four lanes, one per slot in row order: the playing loop's envelope in play order (START rotates it, REV mirrors it) with
+// the playhead, over the song map: one block per loop of that stem in the crate, coloured by section, the playing one lit
+// and the cued one outlined. On the light layer, like the name boxes.
+struct DeckView : TransparentWidget
+{
+    Recycler* m = nullptr;
+
+    void drawLayer (const DrawArgs& a, int layer) override
+    {
+        if (layer == 1 && m) lanes (a.vg);
+        TransparentWidget::drawLayer (a, layer);
+    }
+
+    void lanes (NVGcontext* vg)
+    {
+        namespace V = rc::view;
+        std::string next[4];
+        {
+            std::lock_guard<std::mutex> lk (m->stateMutex);
+            for (int i = 0; i < 4; ++i) next[i] = m->slots[i].path;
+        }
+        const float laneH = box.size.y / 4, pad = px (0.6f), w = box.size.x - 2 * pad;
+        std::lock_guard<std::mutex> lk (m->viewMutex);   // drawing under the lock: the worker only ever holds it briefly
+        for (int i = 0; i < 4; ++i)
+        {
+            const uint32_t id = m->landedId[i].load (std::memory_order_relaxed);
+            const Recycler::Wave* wave = nullptr;
+            for (size_t k = 0; id && k < m->waves[i].size(); ++k)
+                if (m->waves[i][k].id == id) wave = &m->waves[i][k];
+            const std::string playing = wave ? wave->path : std::string();
+
+            // the stem this slot plays (or has cued): its blocks sit together in the sorted map
+            size_t first = 0, count = 0;
+            int playKind = V::NONE;
+            for (size_t k = 0; k < m->crateMap.size() && ! count; ++k)
+            {
+                const Recycler::Block& b = m->crateMap[k];
+                if (b.path != (playing.empty() ? next[i] : playing)) continue;
+                first = k;
+                while (first > 0 && m->crateMap[first - 1].stem == b.stem) --first;
+                for (size_t e = first; e < m->crateMap.size() && m->crateMap[e].stem == b.stem; ++e) ++count;
+            }
+            const float y0 = i * laneH + pad, waveH = laneH * 0.66f - pad, mapY = i * laneH + laneH * 0.72f, mapH = laneH * 0.28f - pad;
+            for (size_t k = first; k < first + count; ++k)
+            {
+                const Recycler::Block& b = m->crateMap[k];
+                const float bw = w / (float) count, x = pad + (float) (k - first) * bw;
+                const bool lit = b.path == playing, cued = b.path == next[i] && next[i] != playing;
+                if (lit) playKind = b.kind;
+                nvgBeginPath (vg);
+                nvgRect (vg, x + 0.5f, mapY, std::max (0.5f, bw - 1.f), mapH);
+                nvgFillColor (vg, sectionColor (b.kind, lit ? 1.f : 0.35f));
+                nvgFill (vg);
+                if (cued)
+                {
+                    nvgStrokeColor (vg, cWhite());
+                    nvgStrokeWidth (vg, 1.f);
+                    nvgStroke (vg);
+                }
+            }
+            if (! wave) continue;
+
+            const int start = (int) std::lround (m->params[Recycler::START_PARAM + i].getValue());
+            const bool rev = m->params[Recycler::REV_PARAM + i].getValue() > 0.5f;
+            float top = 1e-3f;
+            for (int b = 0; b < V::BINS; ++b) top = std::max (top, wave->pk[b]);   // each lane scaled to its own loudest bin
+            const float bw = w / V::BINS, mid = y0 + waveH / 2, half = waveH / 2 / top;
+            const NVGcolor c = playKind == V::NONE ? nvgRGB (0xc8, 0xff, 0x3a) : sectionColor (playKind, 1.f);
+            for (int pass = 0; pass < 2; ++pass)   // peaks faint, RMS solid
+            {
+                nvgBeginPath (vg);
+                for (int p = 0; p < V::BINS; ++p)
+                {
+                    int q = (p + start * V::BINS / rc::shape::START_STEPS) % V::BINS;   // play order: heard bin p reads buffer bin q
+                    if (rev) q = V::BINS - 1 - q;
+                    const float h = (pass ? wave->rms[q] : wave->pk[q]) * half;
+                    nvgRect (vg, pad + p * bw, mid - h, bw, std::max (0.5f, 2 * h));
+                }
+                nvgFillColor (vg, pass ? c : nvgTransRGBAf (c, 0.35f));
+                nvgFill (vg);
+            }
+            const float x = pad + clamp (m->pubHead[i].load (std::memory_order_relaxed), 0.f, 1.f) * w;
+            nvgBeginPath (vg);
+            nvgRect (vg, x - 0.75f, y0, 1.5f, waveH);
+            nvgFillColor (vg, cWhite());
+            nvgFill (vg);
+        }
+    }
+};
+
 // The band's name: empty leaves the panel's MY LIL RECYCLER; a title covers RECYCLER and takes its place in the same
 // face, size and colour, shrunk to fit left of the face. Read every frame, so a rename over MCP shows at once.
 struct TitleBox : TransparentWidget
 {
     Recycler* m = nullptr;
+    CoverCache covers;
+
+    ~TitleBox() { covers.clear(); }
+    void onContextDestroy (const ContextDestroyEvent& e) override
+    {
+        covers.drop (e.vg);
+        TransparentWidget::onContextDestroy (e);
+    }
 
     void draw (const DrawArgs& a) override
     {
-        std::string t;
-        if (m) { std::lock_guard<std::mutex> lk (m->stateMutex); t = m->title; }
+        if (! m) return;
+        std::string t, c;
+        uint32_t g;
+        { std::lock_guard<std::mutex> lk (m->stateMutex); t = m->title; }
+        { std::lock_guard<std::mutex> lk (m->viewMutex); c = m->cover; g = m->coverGen; }
+        float room = box.size.x;
+        if (const int img = covers.get (a.vg, c, g))   // a square at the right end, centre-cropped; the name stops short of it
+        {
+            const float s = box.size.y - px (1.f), x = box.size.x - s, y = px (0.5f);
+            int iw = 1, ih = 1;
+            nvgImageSize (a.vg, img, &iw, &ih);
+            const float k = s / (float) std::max (1, std::min (iw, ih)), pw = iw * k, ph = ih * k;
+            nvgBeginPath (a.vg);
+            nvgRoundedRect (a.vg, x, y, s, s, px (0.6f));
+            nvgFillPaint (a.vg, nvgImagePattern (a.vg, x + (s - pw) / 2, y + (s - ph) / 2, pw, ph, 0.f, img, 1.f));
+            nvgFill (a.vg);
+            room = x - px (1.f);
+        }
         if (t.empty()) return;
         std::shared_ptr<window::Font> font = APP->window->loadFont (asset::system ("res/fonts/DejaVuSans.ttf"));
         if (! font || font->handle < 0) return;
@@ -1433,7 +1696,7 @@ struct TitleBox : TransparentWidget
         nvgFontSize (vg, 100.f);   // nanovg sizes by line height, the SVG by em: scale until RECYCLER is as wide as printed
         float size = 100.f * px (L::TITLE_WORD[2]) / textWidth (vg, "RECYCLER");
         nvgFontSize (vg, size);
-        const float k = std::min (1.f, box.size.x / std::max (1.f, textWidth (vg, t) + px (L::TITLE_BAND[2])));
+        const float k = std::min (1.f, room / std::max (1.f, textWidth (vg, t) + px (L::TITLE_BAND[2])));
         size *= k;
 
         nvgBeginPath (vg);   // the panel's RECYCLER, under the band colour (the stroke reaches 0.2 mm past the glyphs)
@@ -1513,6 +1776,10 @@ struct RecyclerWidget : ModuleWidget
             t->m = module;
             addChild (t);
         }
+        DeckView* deckView = new DeckView;
+        region (deckView, L::DECK_VIEW);
+        deckView->m = module;
+        addChild (deckView);
         PathBox* pathBox = new PathBox;
         region (pathBox, L::PATH_BOX);
         pathBox->m = module;

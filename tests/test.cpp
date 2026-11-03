@@ -10,6 +10,7 @@
 #include "test_stretch.h"
 #include "test_deck.h"
 #include "test_shape.h"
+#include "test_view.h"
 
 int main()
 {
@@ -22,6 +23,7 @@ int main()
     testStretch();
     testDeck();
     testShape();
+    testView();
     std::printf ("%s: %d failure(s)\n", failures ? "FAILED" : "passed", failures);
     return failures ? 1 : 0;
 }

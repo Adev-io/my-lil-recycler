@@ -86,6 +86,27 @@ slot, a drum loop never. BATCH and CHAOS do nothing in Deck mode.
 Make a crate from a list of paths (one per line) with `py -3 tools/mkcrate.py crate.txt <new folder>`: it copies the
 files as `01_name`, `02_name` ... so the list order becomes the deck order. Recycler only reads WAV and AIFF, so other files leave gaps in the numbers.
 
+## Deck display
+
+Right of the transport, four lanes (D, B, M, T: one per slot, in row order) show where each deck is:
+
+- **Waveform**: the playing loop's envelope (peaks faint, RMS solid) in the order you hear it, so START rotates it and REV
+  mirrors it, with a white playhead. It changes when a new render lands (ROLL, a DECK step, PITCH, a tempo change).
+- **Song map**: one block per loop of that slot's stem in the crate (the NN in `<n>-<stem>-<NN>[_<section>][-<tag>].wav`,
+  e.g. `1-drums-07_chorus-120bpm.wav`), coloured by section: intro blue, verse lime, pre-chorus teal, chorus magenta,
+  bridge orange, solo yellow, break lavender, outro deep blue, other grey. The playing loop is lit, the cued one outlined.
+
+A `crate.json` in the folder (all keys optional; anything malformed is ignored) adds:
+
+```
+{ "title": "Doobie Fool", "cover": "cover.jpg", "sections": { "01": "intro", "02": "verse" } }
+```
+
+- `title` names the deck when you pick the folder, and when a patch loads the module unnamed. Name it in the menu
+  afterwards and that name stays (it is saved). A new folder without a title leaves the deck unnamed.
+- `cover` (else `cover.jpg` / `cover.png`) is drawn as a thumbnail at the right of the header.
+- `sections` win over the section in the file name.
+
 ## Shaping each slot
 
 Every slot row has its own shaping controls. They belong to the slot, so they stay put when you re-roll or step the deck.

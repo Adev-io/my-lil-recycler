@@ -92,7 +92,14 @@ CAPTION_X, CAPTION_SIZE = 5.0, 2.2
 FOOTER = ('A_DEVELOPMENT', W - 11.2, 127.9, 2.2)   # left of the bottom-right screw, below the zone   # text, right edge x, baseline, size
 
 # Regions the module draws into: x, y, w, h in mm
-REGIONS = {'PATH_BOX': (16.0, ROW_LIB - 3.5, 100.0, 7.0)}
+REGIONS = {'PATH_BOX': (16.0, ROW_LIB - 3.5, 100.0, 7.0),
+           'DECK_VIEW': (98.0, 23.0, 80.0, 32.0)}   # four lanes (waveform over song map), one per stem, in row order
+LANE_X, LANE_SIZE = 95.0, 2.2   # the lane's role letter, left of the view
+
+
+def lane_letters():
+    x, y, w, h = REGIONS['DECK_VIEW']
+    return [(r[0], y + h / 8 * (2 * i + 1) + 0.73 * LANE_SIZE / 2) for i, r in enumerate(ROLES)]   # letter, baseline
 NAME_BOX = [(4.0, y - 3.0, 54.0, 6.0) for y in STEM_Y]
 
 # (name, kind, x, y, label). A name ending in '+i' is stem i of a per-stem array.
@@ -143,6 +150,7 @@ def extras():
     out += ['<rect x="%g" y="%g" width="%g" height="%g" rx="1" fill="%s"/>' % (b[0], b[1], b[2] - b[0], b[3] - b[1], WELL)
             for _, b in region_boxes()]
     out += [text(r, CAPTION_X, caption_base(y), CAPTION_SIZE, DIM, 'start') for r, y in zip(ROLES, STEM_Y)]
+    out += [text(c, LANE_X, base, LANE_SIZE, DIM) for c, base in lane_letters()]
     return out
 
 
@@ -196,6 +204,7 @@ def all_labels(layout):
             base, size, _, _ = label_at(k, y, rb)
             labels.append((n + ' label', label_box(x, base, size, label)))
     labels += [(r + ' caption', label_box(CAPTION_X, caption_base(y), CAPTION_SIZE, r, 'start')) for r, y in zip(ROLES, STEM_Y)]
+    labels += [(c + ' lane', label_box(LANE_X, base, LANE_SIZE, c)) for c, base in lane_letters()]
     s, x, base, size = FOOTER
     labels.append(('footer', label_box(x, base, size, s, 'end')))
     return labels
