@@ -13,6 +13,7 @@
 #include "plugin.hpp"
 #include "layout.hpp"
 #include "TalkingFace.hpp"
+#include "Title.hpp"
 #include "Analysis.h"
 #include "Audio.h"
 #include "File.h"
@@ -175,6 +176,7 @@ struct Recycler : Module
 
     std::mutex stateMutex;   // UI + worker
     std::string folder;
+    std::string title;   // the panel name: empty draws MY LIL RECYCLER
     SlotState slots[4];
 
     // ---- worker only
@@ -1178,14 +1180,16 @@ struct Recycler : Module
     json_t* dataToJson() override
     {
         json_t* root = json_object();
-        std::string f;
+        std::string f, t;
         SlotState s[4];
         {
             std::lock_guard<std::mutex> lk (stateMutex);
             f = folder;
+            t = title;
             for (int i = 0; i < 4; ++i) { s[i].path = slots[i].path; s[i].k = slots[i].k; s[i].s = slots[i].s; }
         }
         json_object_set_new (root, "folder", json_stringn_nocheck (f.data(), f.size()));
+        title::put (root, t);
         json_object_set_new (root, "run", json_boolean (params[RUN_PARAM].getValue() > 0.5f));
         json_object_set_new (root, "bpm", json_real (params[BPM_PARAM].getValue()));
         json_object_set_new (root, "root", json_integer (clamp ((int) std::round (params[ROOT_PARAM].getValue()), 0, 11)));
@@ -1230,6 +1234,13 @@ struct Recycler : Module
     // every key optional; the params it names are set too (the rig patch carries no params)
     void dataFromJson (json_t* root) override
     {
+        std::string t;
+        const bool haveTitle = title::get (root, t);
+        if (title::only (root))   // a live rename: nothing else changes, nothing reloads
+        {
+            if (haveTitle) { std::lock_guard<std::mutex> lk (stateMutex); title = t; }
+            return;
+        }
         double v;
         bool b;
         bool deckJson = false;
@@ -1278,6 +1289,7 @@ struct Recycler : Module
         {
             std::lock_guard<std::mutex> lk (stateMutex);
             if (haveFolder) folder = f;
+            title = t;   // a patch without the key (2.2.0 and older) loads unnamed
             if (arr) for (int i = 0; i < 4; ++i) slots[i] = s[i];
             hasFolder = ! folder.empty();
         }
@@ -1401,6 +1413,64 @@ struct NameBox : TransparentWidget
     }
 };
 
+// The band's name: empty leaves the panel's MY LIL RECYCLER; a title covers RECYCLER and takes its place in the same
+// face, size and colour, shrunk to fit left of the face. Read every frame, so a rename over MCP shows at once.
+struct TitleBox : TransparentWidget
+{
+    Recycler* m = nullptr;
+
+    void draw (const DrawArgs& a) override
+    {
+        std::string t;
+        if (m) { std::lock_guard<std::mutex> lk (m->stateMutex); t = m->title; }
+        if (t.empty()) return;
+        std::shared_ptr<window::Font> font = APP->window->loadFont (asset::system ("res/fonts/DejaVuSans.ttf"));
+        if (! font || font->handle < 0) return;
+        namespace L = layout::recycler;
+        NVGcontext* vg = a.vg;
+        t = title::upper (t);
+        nvgFontFaceId (vg, font->handle);
+        nvgFontSize (vg, 100.f);   // nanovg sizes by line height, the SVG by em: scale until RECYCLER is as wide as printed
+        float size = 100.f * px (L::TITLE_WORD[2]) / textWidth (vg, "RECYCLER");
+        nvgFontSize (vg, size);
+        const float k = std::min (1.f, box.size.x / std::max (1.f, textWidth (vg, t) + px (L::TITLE_BAND[2])));
+        size *= k;
+
+        nvgBeginPath (vg);   // the panel's RECYCLER, under the band colour (the stroke reaches 0.2 mm past the glyphs)
+        nvgRect (vg, 0.f, 0.f, px (L::TITLE_WORD[2] + L::TITLE_BAND[2]), box.size.y);
+        nvgFillColor (vg, nvgRGB (0xc8, 0xff, 0x3a));
+        nvgFill (vg);
+
+        nvgFontSize (vg, size);
+        nvgFillColor (vg, nvgRGB (0x16, 0x16, 0x1a));
+        nvgTextAlign (vg, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE);
+        const float x = px (L::TITLE_BAND[2] / 2), y = px (L::TITLE_WORD[1]), r = px (L::TITLE_BAND[2] / 2) * k;
+        for (int i = 0; i <= 8; ++i)   // the panel strokes its title 0.39 mm: eight offset copies make the same weight
+        {
+            const float ang = i * float (M_PI) / 4.f, d = i < 8 ? r : 0.f;
+            nvgText (vg, x + d * std::cos (ang), y + d * std::sin (ang), t.c_str(), nullptr);
+        }
+    }
+};
+
+// Right-click menu "Name": edits the title as you type; Enter closes the menu.
+struct TitleField : ui::TextField
+{
+    Recycler* m = nullptr;
+
+    void onChange (const ChangeEvent& e) override
+    {
+        if (m) { std::lock_guard<std::mutex> lk (m->stateMutex); m->title = getText(); }
+        ui::TextField::onChange (e);
+    }
+
+    void onAction (const ActionEvent& e) override
+    {
+        if (ui::MenuOverlay* o = getAncestorOfType<ui::MenuOverlay>()) o->requestDelete();
+        e.consume (this);
+    }
+};
+
 // FOLDER: a momentary button that opens the folder dialog when released.
 struct FolderButton : VCVButton
 {
@@ -1435,6 +1505,14 @@ struct RecyclerWidget : ModuleWidget
             w->box.pos = mm2px (Vec (r[0], r[1]));
             w->box.size = mm2px (Vec (r[2], r[3]));
         };
+        {
+            TitleBox* t = new TitleBox;   // from where RECYCLER starts, less half the stroke, to the face
+            const float x0 = L::TITLE_WORD[0] - L::TITLE_BAND[2] / 2;
+            t->box.pos = mm2px (Vec (x0, 0.f));
+            t->box.size = mm2px (Vec (L::TITLE_BAND[1] - x0, L::TITLE_BAND[0]));
+            t->m = module;
+            addChild (t);
+        }
         PathBox* pathBox = new PathBox;
         region (pathBox, L::PATH_BOX);
         pathBox->m = module;
@@ -1501,6 +1579,17 @@ struct RecyclerWidget : ModuleWidget
     {
         Recycler* m = dynamic_cast<Recycler*> (module);
         if (! m) return;
+        menu->addChild (new MenuSeparator);
+        menu->addChild (createMenuLabel ("Name (the panel reads MY LIL <name>; empty = RECYCLER)"));
+        {
+            TitleField* f = new TitleField;
+            f->box.size.x = 220.f;
+            f->placeholder = "RECYCLER";
+            { std::lock_guard<std::mutex> lk (m->stateMutex); f->text = m->title; }
+            f->selectAll();
+            f->m = m;
+            menu->addChild (f);
+        }
         menu->addChild (new MenuSeparator);
         menu->addChild (createBoolMenuItem ("Deck mode", "", [=] { return m->deck.load(); }, [=] (bool on) { m->setDeck (on); }));
         menu->addChild (createMenuLabel ("Deck: files in name order; ROLL = next, LOCK = previous, swaps on the loop end"));

@@ -6,4 +6,6 @@ include $(RACK_DIR)/plugin.mk
 
 test:
 	$(MAKE) -C tests
-.PHONY: test
+title-test:
+	$(MAKE) -C tests title
+.PHONY: test title-test

@@ -280,6 +280,9 @@ def header(layout):
     lines += ['constexpr float %s[4] = {%.2ff, %.2ff, %.2ff, %.2ff};   // x, y, w, h' % ((n,) + r) for n, r in REGIONS.items()]
     lines += ['constexpr float NAME_BOX[%d][4] = {%s};   // x, y, w, h' % (len(NAME_BOX), ', '.join('{%.2ff, %.2ff, %.2ff, %.2ff}' % r for r in NAME_BOX))]
     lines += ['constexpr float FACE[3] = {%.2ff, %.2ff, %.3ff};   // mascot centre x, y, radius (TalkingFace)' % (MASCOT_X, BAND / 2, MASCOT_R)]
+    word_x = TITLE_X + width(TITLE[:-len('RECYCLER')], TITLE_SIZE)   # where RECYCLER starts: a module name replaces that word
+    lines += ['constexpr float TITLE_WORD[4] = {%.3ff, %.2ff, %.3ff, %.2ff};   // RECYCLER: x, baseline, width, em size' % (word_x, TITLE_Y, width('RECYCLER', TITLE_SIZE), TITLE_SIZE)]
+    lines += ['constexpr float TITLE_BAND[3] = {%.2ff, %.2ff, %.2ff};   // band height, name right limit (left of the face), stroke' % (BAND, MASCOT_X - MASCOT_R - 1.5, 0.39)]
     lines += ['}', '}', '']
     return '\n'.join(lines)
 

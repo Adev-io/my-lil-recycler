@@ -104,6 +104,8 @@ module to its right out of the way once.
 
 ## Right-click menu
 
+- **Name**: type a name and the panel reads MY LIL <NAME> (for one Recycler per song); empty shows MY LIL RECYCLER. Saved
+  with the patch as `title` in the module data; setting only `{"title": ...}` (e.g. over MCP) renames it live and changes nothing else.
 - **Deck mode**: play the folder as a crate in file-name order (see Deck mode).
 - **Rescan folder**: picks up new, changed and deleted files.
 - **Forget library**: deletes the cache and empties the slots. Rescan to start over.

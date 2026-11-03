@@ -37,5 +37,7 @@ constexpr float OUT_R_OUTPUT[4][2] = {{175.50f, 63.60f}, {175.50f, 76.60f}, {175
 constexpr float PATH_BOX[4] = {16.00f, 14.50f, 100.00f, 7.00f};   // x, y, w, h
 constexpr float NAME_BOX[4][4] = {{4.00f, 60.60f, 54.00f, 6.00f}, {4.00f, 73.60f, 54.00f, 6.00f}, {4.00f, 86.60f, 54.00f, 6.00f}, {4.00f, 99.60f, 54.00f, 6.00f}};   // x, y, w, h
 constexpr float FACE[3] = {168.42f, 4.30f, 3.096f};   // mascot centre x, y, radius (TalkingFace)
+constexpr float TITLE_WORD[4] = {26.330f, 6.30f, 22.436f, 4.30f};   // RECYCLER: x, baseline, width, em size
+constexpr float TITLE_BAND[3] = {8.60f, 163.82f, 0.39f};   // band height, name right limit (left of the face), stroke
 }
 }
