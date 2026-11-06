@@ -8,7 +8,7 @@
 import os, sys, time, threading, traceback, importlib, subprocess, mido
 here = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, here)
 LOG = open(os.path.join(here, 'pads.log'), 'a', buffering=1); sys.stderr = LOG
-import sections, fx
+import sections, fx, synths
 STOP = os.path.join(here, 'pads.stop')
 state = {'on': [{} for _ in sections.PAGES], 'page': 0, 'busy': False, 'fx': set(), 'gen': 0, 'dgen': 0, 'snap': None, 'hw': False, 'swept': [], 'tgen': 0, 'hush': {}, 'bank': 0, 'saved': {}, 'agen': 0, 'machine': True, 'fgen': 0, 'fading': False, 'acts': 0}
 HUSH = {'drums only': (1, 2, 3, 5, 6), 'no drums': (0, 4)}       # Mixer strips each move silences: drums only = Acid, decks A/B,
@@ -70,6 +70,7 @@ def turn(d):                                                    # arrow: next / 
     p = state['page'] + d
     if not 0 <= p < len(sections.PAGES) or state['busy']: return False
     state['page'] = p; open(os.path.join(here, 'page.txt'), 'w').write(str(p))   # the MiniLab (minilab.py, page) follows it
+    threading.Thread(target=synths.set_scale, args=(p,), daemon=True).start()     # the arp's keys follow the song
     LOG.write(time.ctime() + f" page {p + 1} {sections.PAGES[p]['name']}\n"); paint(); return True
 def sweep(to, gen, decks):                                      # the song's decks: base -> target over SWEEP_SECS, stops if another move takes over
     n = int(fx.SWEEP_SECS / fx.STEP)
@@ -197,7 +198,7 @@ def on_msg(msg):
     elif msg.type == 'control_change' and msg.value and msg.control == fx.BANK_CC: flip()
     elif msg.type == 'control_change' and msg.value and msg.control == MACHINE_CC: threading.Thread(target=machine, daemon=True).start()
 open(os.path.join(here, 'page.txt'), 'w').write('0')
-try: sections.base(); state['on'] = [sections.now(p['rows']) for p in sections.PAGES]
+try: sections.base(); synths.set_scale(0); state['on'] = [sections.now(p['rows']) for p in sections.PAGES]
 except Exception: LOG.write(traceback.format_exc())
 inp = lp(mido.get_input_names(), 'LPMiniMK3 MIDI'); inp = inp and mido.open_input(inp, callback=on_msg)
 import board; board.start(press, state, turn, minilab, flip, machine)

@@ -16,4 +16,7 @@ assert [maps.acid_name(v) for v in (8, 10, 11, 16, 23)] == ['I-B1', 'Lowdown vam
 m0, m1 = maps.mix_map(0), maps.mix_map(1)                                   # drums + mix follows the song on show
 assert m0[83][:2] == (S.A, 15) and m0[83][3] == 'keys vol' and m1[83][:2] == (S.B, 15) and m1[83][3] == 'piano vol', (m0[83], m1[83])
 assert m0[16] == m1[16] and m0[18] == m1[18] and m0[16][0] == S.DRUMS                     # drums the same on both songs
+import synths                                                               # arp scale per song page (2026-11-06 arp + acid)
+assert set(S.SCALES) == {0, 1} and all(len(set(p)) == 7 and all(0 <= c < 12 for c in p) for p in S.SCALES.values()), S.SCALES
+assert synths.mask_of((1, 2, 4, 6, 7, 9, 11)) == 2774
 print('ok')

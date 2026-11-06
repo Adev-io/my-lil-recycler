@@ -100,6 +100,8 @@ ROWS_TOOM = {
     21: dict(name='drums',  slot=0, level=1.0, color=13, deck=ROWS[21]['deck'], samples=Q('drums', '05', '02', '03', '06', '04', '07', '08', '15')),   # 16 outro near silent
 }
 PAGES = [dict(name='Lowdown', rows=ROWS), dict(name='Time Out Of Mind', rows=ROWS_TOOM)]
+# Arp keys per song page (pitch classes, C = 0). scale_scan.py 2026-11-06: both songs' bass sits in D major (D E F# G A B C#).
+SCALES = {0: (1, 2, 4, 6, 7, 9, 11), 1: (1, 2, 4, 6, 7, 9, 11)}
 def base():                                                    # deck A + deck B strips; deck A slots without a row silent
     mix = {p['id']: p['value'] for p in json.loads(call('vcvrack_get_params', {'moduleId': MIX}))}
     if mix[3] < 0.05:                                          # deck B was closed: its page starts silent, then the strip opens
