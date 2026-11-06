@@ -1,0 +1,19 @@
+# Self-check for the virtual controller helpers in maps.py (no Rack needed): py -3.11 board_check.py
+import maps, sections as S
+for pg in S.PAGES:
+    for b, r in sorted(pg['rows'].items(), reverse=True):
+        l = maps.pad_labels(r['samples']); assert len(l) == len(r['samples']) and all(l), (r['name'], l); print(f'{pg["name"][:7]} {r["name"]:12s}', l)
+        assert all(b + i <= b + 7 for i in range(len(l))), (r['name'], 'more than 8 pads')
+assert maps.pad_labels(S.ROWS_TOOM[71]['samples'])[:2] == ['05 verse', '02 verse']
+assert maps.pad_labels(S.ROWS[81]['samples']) == ['14 chop', '14'], maps.pad_labels(S.ROWS[81]['samples'])
+assert maps.pad_labels(S.ROWS[31]['samples'])[:3] == ['strings 08', 'strings 13', 'full 08']
+for mode, M in maps.MODES.items():
+    assert set(M['cc']) <= set(maps.KNOBS + maps.FADERS), mode
+    for cc, (mod, pid, f, label) in M['cc'].items():
+        for v in range(128): assert f(maps.to_cc(f, f(v))) == f(v), (mode, label, v)
+assert maps.to_cc(maps.lin, 0.5) in (63, 64) and maps.to_cc(maps.fader, 2.0) == 127 and maps.to_cc(maps.knob, 0.0) == 64
+assert [maps.acid_name(v) for v in (8, 10, 11, 16, 23)] == ['I-B1', 'Lowdown vamp', 'I-B4', 'walk-down', 'I-C8']
+m0, m1 = maps.mix_map(0), maps.mix_map(1)                                   # drums + mix follows the song on show
+assert m0[83][:2] == (S.A, 15) and m0[83][3] == 'keys vol' and m1[83][:2] == (S.B, 15) and m1[83][3] == 'piano vol', (m0[83], m1[83])
+assert m0[16] == m1[16] and m0[18] == m1[18] and m0[16][0] == S.DRUMS                     # drums the same on both songs
+print('ok')

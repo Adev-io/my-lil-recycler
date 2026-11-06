@@ -1,0 +1,123 @@
+# The set's sections for dj-set.vcv. apply(i) moves the rig there over MCP; drum_pattern(n) sets My lil Drums' pattern 1..16.
+# CLI: py -3 sections.py <0..9> | drums <1..16>
+import json, os, re, sys, time
+here = os.path.dirname(os.path.abspath(__file__))
+exec(open(os.path.join(here, 'rack.py')).read().split('if sys.argv[1]')[0])
+call = lambda n, a: rpc('tools/call', {'name': n, 'arguments': a}, timeout=60)['result']['content'][0]['text']
+A, ACID, MIX, DRUMS = 5192219511640844, 8333663024495709, 2874844741614313, 7189220493962056
+B = json.load(open(os.path.join(here, 'deckb.json')))['B']
+CR = r'C:\Users\Arikl\Desktop\uvr-loops\crates\lowdown2-crate'; CRB = r'C:\Users\Arikl\Desktop\uvr-loops\crates\toom-crate'
+U = 0.707; DR = 0.80                                     # mixer unity; drums strip after the balance pass (+2 dB)
+CHOP_V = CR.replace('\\', '/') + '/6-vocals-14-115bpm-chop4.wav'; CHOP_G = CR.replace('\\', '/') + '/3-guitar-14-115bpm-chop4.wav'
+HORNS = CR.replace('\\', '/') + '/5-other-16-115bpm.wav'
+# deck slots: 1 bass stem, 2 piano, 3 guitar, 4 vocals. levels = (bass, piano, guitar, vocals). strips = (drums, acid, deck A, deck B).
+# Acid: 10 = I-B3 (Lowdown E/A vamp), 14 = I-B7 (Time Out Of Mind A vamp), 16 = I-C1 (TOOM walk-down).
+SECTIONS = [
+    # 2026-11-04: samples only. Drums and Acid strips stay at 0; every pad is Recycler deck A, one sample added per pad.
+    dict(name='0 vocal chop',   acid=10, loop=14, levels=(0.0, 0.0, 0.0, 1.0), strips=(0.0, 0.0, U, 0.0), override={3: CHOP_V}),
+    dict(name='1 +piano',       acid=10, loop=14, levels=(0.0, 1.2, 0.0, 1.0), strips=(0.0, 0.0, U, 0.0), override={3: CHOP_V}),
+]
+# Old pads 4-10 (locked 2026-11-03 under the many-changes-per-press method), kept on file, not on the Launchpad.
+OLD_SECTIONS = [
+    dict(name='0 vocal solo',   acid=10, loop=14, levels=(0.0, 0.0, 0.0, 1.0), strips=(0.0, 0.0, U, 0.0), override={3: CHOP_V}, drums=1),
+    dict(name='1 kick',         acid=10, loop=14, levels=(0.0, 0.0, 0.0, 1.0), strips=(DR, 0.0, U, 0.0), override={3: CHOP_V}, drums=16),   # pattern 16 = pattern 12's house kick alone (pattern 1 had a snare pickup every bar)
+    dict(name='2 kick+acid',    acid=10, loop=14, levels=(0.0, 0.0, 0.0, 1.0), strips=(DR, U, U, 0.0), override={3: CHOP_V}, drums=12),   # Acid I-B3 over the Lowdown hats (kick-only under it: no lock 22:30)
+    dict(name='3 +piano',       acid=10, loop=14, levels=(0.0, 1.2, 0.0, 1.0), strips=(DR, U, U, 0.0), override={3: CHOP_V}, drums=12),    # pad 3 + piano 14, nothing else
+    dict(name='3 intro',        acid=10, loop=3,  levels=(0.0, 1.2, 1.0, 0.0), strips=(DR, U, U, 0.0), drums=12),   # Lowdown groove, light hats
+    dict(name='4 chorus',       acid=10, loop=14, levels=(0.0, 1.2, 1.0, 0.0), strips=(DR, U, U, 0.0), drums=11),   # Lowdown groove, full
+    dict(name='5 chorus+bass',  acid=10, loop=14, levels=(0.5, 1.2, 1.0, 0.0), strips=(DR, U, U, 0.0), drums=13),   # + clap on 2 and 4
+    dict(name='6 vocals chop',  acid=10, loop=14, levels=(0.5, 1.2, 1.0, 1.0), strips=(DR, U, U, 0.0), override={2: CHOP_G, 3: CHOP_V}, drums=13),
+    dict(name='7 horn bridge',  acid=10, loop=16, levels=(0.0, 0.6, 1.2, 0.0), strips=(DR, U, U, 0.0), override={2: HORNS}, drums=13,     # horns in the guitar slot
+         b_loop=5, b_levels=(0.0, 1.0, 1.0, 1.0)),                                                                                # deck B armed on the TOOM verse
+    dict(name='8 Steely Mind',  acid=14, loop=16, levels=(0.0, 0.6, 1.2, 0.0), strips=(DR, U, 0.0, U), override={2: HORNS}, drums=14,   # TOOM verse groove
+         b_loop=5, b_levels=(0.0, 1.0, 1.0, 1.0)),                                                                                # Lowdown out, TOOM in, Acid I-B7
+    dict(name='9 walk-down',    acid=16, loop=16, levels=(0.0, 0.6, 1.2, 0.0), strips=(DR, U, 0.0, U), override={2: HORNS}, drums=15,   # TOOM chorus groove + clap
+         b_loop=4, b_levels=(0.0, 1.0, 1.0, 1.0)),                                                                                # TOOM chorus loop 04, Acid I-C1 (A G F# E D)
+]
+def set_slots(mid, crate, loop, override, pat):
+    files = sorted(f for f in os.listdir(crate) if f.endswith('.wav') and 'chop' not in f)
+    st = json.loads(call('vcvrack_get_module_state', {'id': mid})); changed = False
+    for k, s in enumerate(st['data']['slots']):
+        stem = ['bass', 'piano', 'guitar', 'vocals'][k]
+        c = [f for f in files if re.match(rf'\d-{stem}-(\d\d){pat}', f)]
+        p = crate.replace('\\', '/') + '/' + min(c, key=lambda f: abs(int(re.search(r'-(\d\d)', f).group(1)) - loop))
+        p = override.get(k, p)
+        if s['path'] != p: s['path'] = p; changed = True
+    if changed: call('vcvrack_set_module_state', {'id': mid, 'state': st})     # lands at the next loop start
+def apply(i):
+    S = SECTIONS[i]
+    set_slots(A, CR, S['loop'], S.get('override', {}), '-')
+    call('vcvrack_set_params', {'moduleId': A, 'params': [{'id': 14 + k, 'value': v} for k, v in enumerate(S['levels'])]})
+    if 'b_loop' in S:
+        set_slots(B, CRB, S['b_loop'], {}, '_')
+        call('vcvrack_set_params', {'moduleId': B, 'params': [{'id': 14 + k, 'value': v} for k, v in enumerate(S['b_levels'])]})
+    call('vcvrack_set_params', {'moduleId': ACID, 'params': [{'id': 24, 'value': S['acid']}]})
+    if S.get('drums'): drum_pattern(S['drums'])
+    call('vcvrack_set_params', {'moduleId': MIX, 'params': [{'id': k, 'value': v} for k, v in enumerate(S['strips'])] + [{'id': 40 + k, 'value': 0} for k in range(4)]})
+    return S['name']
+def drum_pattern(n):
+    call('vcvrack_set_params', {'moduleId': DRUMS, 'params': [{'id': 3, 'value': n - 1}]})
+    return n
+def current_drum_pattern():
+    return int(round(next(p['value'] for p in json.loads(call('vcvrack_get_params', {'moduleId': DRUMS})) if p['id'] == 3))) + 1
+def save():
+    return call('vcvrack_save_patch', {'path': os.path.expandvars(r'%LOCALAPPDATA%\Rack2\patches\dj-set.vcv')})
+if __name__ == '__main__':
+    if sys.argv[1] == 'drums': print('drums pattern', drum_pattern(int(sys.argv[2])))
+    else: print('section', apply(int(sys.argv[1])))
+    print(save())
+
+# 2026-11-04 row layout (Ari): each Launchpad row is one instrument = one deck A slot. A pad picks that row's sample, the lit
+# pad pressed again mutes the row. Rows play together on deck A's loop grid. Samples only: Drums and Acid strips stay 0.
+P = lambda f: CR.replace('\\', '/') + '/' + f
+ROWS = {
+    81: dict(name='vocals', slot=3, level=1.0, color=53, samples=[CHOP_V, P('6-vocals-14-115bpm.wav')]),   # Ari kept pads 1-2 (09:10); 15, 16, 11, 03, 06, 07 dropped
+    71: dict(name='keys',   slot=1, level=1.2, color=45, samples=[P(f'4-piano-{n}-115bpm.wav') for n in ('14', '15', '16', '13', '03', '09', '10', '17')]),
+    61: dict(name='bridge keys', slot=1, level=1.2, color=21,          # same slot as keys: a bridge pad swaps the row 2 piano out
+             samples=[P(f'4-piano-{n}-115bpm-chop4.wav') for n in ('08', '09', '10', '13')]),   # 4-bar bridge halves: 08 C#-C-B-G#, 09/10 F#-B, 13 D-C#-C-A#
+    51: dict(name='horns', slot=2, level=1.2, color=9,                 # 'other' stem in the guitar slot; vamp loops with sound in all 8 bars
+             samples=[P(f'5-other-{n}-115bpm.wav') for n in ('15', '16', '14')]),   # Ari kept pads 1-3 (11:05); 17, 12, 18, 07 dropped
+    31: dict(name='crescendo', slot=2, level=1.0, color=5,             # same slot as horns. Pads 1-2 strings only ('other' 08/13 walk-down swell),
+             samples=[P('5-other-08-115bpm-chop4.wav'), P('5-other-13-115bpm-chop4.wav')]           # pads 3-6 whole bridge = all stems but drums
+                     + [P(f'7-mix-{n}-115bpm-chop4.wav') for n in ('08', '13', '09', '10')]),        # summed (7-mix-*): 08/13 swells, 09 b5-8 build, 10 b1-4
+    21: dict(name='drums', slot=0, level=1.0, color=13, deck=json.load(open(os.path.join(here, 'deckc.json')))['C'],   # deck C = the record's drum stem
+             samples=[P(f'1-drums-{n}-115bpm.wav') for n in ('15', '16', '12')] + [P('1-drums-13-115bpm-chop4.wav')]),   # Ari kept old pads 2, 3, 6, 8 (10:25); pad 4 = bridge walk-down 13a
+    41: dict(name='bass', slot=0, level=1.0, color=37,                 # pads 1-4 vamp loops, pads 5-8 the bridge halves (same as row 3)
+             samples=[P(f'2-bass-{n}-115bpm.wav') for n in ('14', '15', '16', '03')] + [P(f'2-bass-{n}-115bpm-chop4.wav') for n in ('08', '09', '10', '13')]),
+}
+# 2026-11-06 page 2 (Launchpad right arrow): Time Out Of Mind on deck B (toom-crate, 124 BPM loops locked to the clock).
+# Pads only: turning the page changes no sound; a pad brings that row in. Horns, guitar and solo share deck B's guitar slot.
+# Drums row (2026-11-06, Ari): the TOOM drum stem in deck C's slot, the same slot as page 1's Lowdown drums row, so a TOOM drum
+# pad replaces the Lowdown drums at the next loop start (toom-crate re-cut on the kick since the old set's groove trouble).
+Q = lambda stem, *nn: [CRB.replace('\\', '/') + '/' + next(f for f in os.listdir(CRB) if re.match(rf'\d-{stem}-{n}_', f)) for n in nn]
+ROWS_TOOM = {
+    81: dict(name='vocals', slot=3, level=1.0, color=53, deck=B, samples=Q('vocals', '05', '02', '03', '06', '11', '12', '04', '07')),
+    71: dict(name='piano',  slot=1, level=1.0, color=45, deck=B, samples=Q('piano', '05', '02', '03', '06', '12', '04', '07', '01')),
+    61: dict(name='horns',  slot=2, level=1.0, color=9,  deck=B, samples=Q('other', '05', '02', '03', '06', '04', '07', '15', '01')),
+    51: dict(name='guitar', slot=2, level=1.0, color=21, deck=B, samples=Q('guitar', '05', '02', '03', '06', '04', '07')),
+    41: dict(name='bass',   slot=0, level=1.0, color=37, deck=B, samples=Q('bass', '05', '02', '03', '06', '04', '07', '13', '15')),   # 04/07/13 = walk-down
+    31: dict(name='solo',   slot=2, level=1.0, color=5,  deck=B, samples=Q('guitar', '08', '09', '10', '14')),
+    21: dict(name='drums',  slot=0, level=1.0, color=13, deck=ROWS[21]['deck'], samples=Q('drums', '05', '02', '03', '06', '04', '07', '08', '15')),   # 16 outro near silent
+}
+PAGES = [dict(name='Lowdown', rows=ROWS), dict(name='Time Out Of Mind', rows=ROWS_TOOM)]
+def base():                                                    # deck A + deck B strips; deck A slots without a row silent
+    mix = {p['id']: p['value'] for p in json.loads(call('vcvrack_get_params', {'moduleId': MIX}))}
+    if mix[3] < 0.05:                                          # deck B was closed: its page starts silent, then the strip opens
+        call('vcvrack_set_params', {'moduleId': B, 'params': [{'id': 14 + k, 'value': 0.0} for k in range(4)]})
+    call('vcvrack_set_params', {'moduleId': MIX, 'params': [{'id': k, 'value': v} for k, v in enumerate((0.0, 0.0, U, U))] + [{'id': 40 + k, 'value': 0} for k in range(4)]})
+    rows = {r['slot'] for r in ROWS.values()}
+    call('vcvrack_set_params', {'moduleId': A, 'params': [{'id': 14 + k, 'value': 0.0} for k in range(4) if k not in rows]})
+def play(slot, path, level, deck=None):                        # path None = mute the slot; a new path lands at the next loop start
+    deck = deck or A
+    if path:
+        st = json.loads(call('vcvrack_get_module_state', {'id': deck}))
+        if st['data']['slots'][slot]['path'] != path:
+            st['data']['slots'][slot]['path'] = path; call('vcvrack_set_module_state', {'id': deck, 'state': st})
+    call('vcvrack_set_params', {'moduleId': deck, 'params': [{'id': 14 + slot, 'value': level if path else 0.0}]})
+def now(rows=None):                                            # row -> index of the sample playing (None = muted), read from the rig
+    out = {}
+    for b, r in (rows or ROWS).items():
+        st = json.loads(call('vcvrack_get_module_state', {'id': r.get('deck', A)})); lv = {p['id']: p['value'] for p in st['params']}
+        path = st['data']['slots'][r['slot']]['path']
+        out[b] = r['samples'].index(path) if lv[14 + r['slot']] > 0.01 and path in r['samples'] else None
+    return out

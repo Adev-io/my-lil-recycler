@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>My lil Live set · controllers</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --room: #121214; --room2: #19191c; --ink: #ecebe6; --dim: #8d8b86; --faint: #4a4946;
+    --lp-body: #0b0b0c; --lp-edge: #2b2b2f; --pad-off: #232326;
+    --ml-body: #e9e7e1; --ml-edge: #c9c6bd; --ml-ink: #1d1d1f; --ml-dim: #6f6c66; --ml-pad: #2c2c30;
+    --blue: #2f6bff; --accent: #ff9b2f;
+    --mono: "Cascadia Mono", "JetBrains Mono", Consolas, ui-monospace, monospace;
+    --sans: "Segoe UI Variable Text", "Segoe UI", "Bahnschrift", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; color: var(--ink); font-family: var(--sans);
+         background: radial-gradient(1200px 600px at 30% -10%, #232327 0%, var(--room) 60%) fixed; }
+  header { display: flex; align-items: baseline; gap: 16px; padding: 18px 28px 6px; }
+  header h1 { font: 600 15px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; margin: 0; }
+  header .sub { color: var(--dim); font-size: 13px; }
+  #banner { display: none; margin: 8px 28px 0; padding: 10px 14px; border-radius: 8px; background: #4a1d17; color: #ffd9d2;
+            font: 13px var(--mono); }
+  main { display: flex; flex-wrap: wrap; gap: 36px; align-items: flex-start; padding: 18px 28px 40px; }
+  .tag { font: 600 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--dim); margin: 0 0 10px 2px; }
+  .tag b { color: var(--ink); font-weight: 600; }
+
+  /* Launchpad */
+  .lp-wrap { display: grid; grid-template-columns: auto auto; gap: 0 12px; }
+  .rowname { display: grid; grid-template-rows: 28px repeat(8, 58px); row-gap: 8px; padding-top: 20px; }
+  .rowname div { display: flex; align-items: center; justify-content: flex-end; font: 600 12px var(--mono);
+                 letter-spacing: .06em; text-transform: uppercase; color: var(--dim); white-space: nowrap; }
+  .rowname div i { width: 8px; height: 8px; border-radius: 2px; margin-left: 8px; }
+  .lp { background: var(--lp-body); border: 1px solid var(--lp-edge); border-radius: 18px; padding: 20px;
+        box-shadow: 0 24px 60px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.05);
+        display: grid; grid-template-columns: repeat(8, 58px) 28px; grid-template-rows: 28px repeat(8, 58px); gap: 8px; }
+  .round { width: 22px; height: 22px; border-radius: 50%; background: #1a1a1d; border: 1px solid #2a2a2e; place-self: center; padding: 0;
+           color: #55545a; font: 11px/20px var(--mono); }
+  button.round { cursor: pointer; }
+  button.round.lit { background: #3a2410; border-color: var(--accent); color: var(--accent); }
+  button.round:disabled { cursor: default; }
+  button.round.bank { border-color: var(--accent); color: var(--accent); }        /* more moves: always findable, filled on bank 2 */
+  button.round.bank.lit { background: var(--accent); color: #1a1205; }
+  button.round.machine { border-color: #ffd93a; color: #ffd93a; }                /* drum machine on / off: filled = on */
+  button.round.machine.lit { background: #ffd93a; color: #1a1205; }
+  .pagename { font: 600 12px var(--mono); letter-spacing: .08em; color: var(--accent); margin-left: 10px; text-transform: uppercase; }
+  .pad { width: 58px; height: 58px; border-radius: 7px; background: var(--pad-off); border: 0; padding: 5px;
+         display: flex; align-items: flex-end; justify-content: flex-start; text-align: left;
+         font: 600 12px/1.15 var(--mono); color: rgba(0,0,0,.78); cursor: pointer;
+         box-shadow: inset 0 -3px 0 rgba(0,0,0,.25); transition: transform .06s, filter .12s; }
+  .pad:disabled { cursor: default; box-shadow: none; }
+  .pad:not(:disabled):hover { filter: brightness(1.15); }
+  .pad:not(:disabled):active { transform: translateY(1px) scale(.98); }
+  .pad.fx { color: #fff; }
+  .pad.on { animation: blink .5s steps(1) infinite; color: #fff; outline: 3px solid #fff; outline-offset: 2px; }
+  .pad.flash { background: #fff !important; color: #000 !important; animation: none; }
+  @keyframes blink { 0% { background: var(--blue); } 50% { background: #15151a; } }
+
+  /* MiniLab */
+  .ml { background: linear-gradient(180deg, #f3f1ec, var(--ml-body)); color: var(--ml-ink); border: 1px solid var(--ml-edge);
+        border-radius: 16px; padding: 18px 20px 16px; width: 700px; max-width: 100%;
+        box-shadow: 0 24px 60px rgba(0,0,0,.55), inset 0 1px 0 #fff; }
+  .ml .top { display: grid; grid-template-columns: 1fr auto; gap: 22px; align-items: start; }
+  .ml h2 { margin: 0 0 12px; font: 700 13px var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+  .ml h2 span { color: var(--ml-dim); font-weight: 600; }
+  .modes { display: inline-flex; gap: 0; margin-left: 12px; vertical-align: middle; border: 1px solid #bdb9ae; border-radius: 7px; overflow: hidden; }
+  .modes button { border: 0; background: transparent; padding: 5px 10px; font: 700 11px var(--mono); letter-spacing: .08em;
+                  text-transform: uppercase; color: var(--ml-dim); cursor: pointer; }
+  .modes button.on { background: var(--ml-ink); color: #f3f1ec; cursor: default; }
+  .modes button:not(.on):hover { background: #dcd9d1; }
+  .knobs { display: grid; grid-template-columns: repeat(4, 94px); gap: 10px 8px; }
+  .knob { display: flex; flex-direction: column; align-items: center; gap: 3px; user-select: none; touch-action: none; }
+  .knob svg { width: 58px; height: 58px; cursor: ns-resize; }
+  .knob.none svg { cursor: default; opacity: .35; }
+  .lbl { font: 600 11px var(--mono); text-align: center; line-height: 1.2; min-height: 14px; }
+  .val { font: 11px var(--mono); color: var(--ml-dim); min-height: 13px; }
+  .faders { display: grid; grid-template-columns: repeat(4, 60px); gap: 8px; }
+  .fader { display: flex; flex-direction: column; align-items: center; gap: 4px; user-select: none; touch-action: none; }
+  .track { position: relative; width: 34px; height: 150px; cursor: ns-resize; }
+  .track::before { content: ""; position: absolute; left: 15px; top: 4px; bottom: 4px; width: 4px; border-radius: 2px; background: #3a3936; }
+  .cap { position: absolute; left: 2px; width: 30px; height: 18px; border-radius: 4px; background: linear-gradient(#3b3b40, #19191c);
+         box-shadow: 0 2px 4px rgba(0,0,0,.35); }
+  .cap::after { content: ""; position: absolute; left: 4px; right: 4px; top: 8px; height: 2px; background: #f2f0ea; }
+  .pads { margin-top: 14px; display: grid; grid-template-columns: 64px repeat(8, 1fr); gap: 7px; align-items: center; }
+  .pads .bank { font: 600 11px var(--mono); color: var(--ml-dim); text-transform: uppercase; letter-spacing: .08em; }
+  .mpad { height: 50px; border-radius: 6px; border: 0; background: var(--ml-pad); color: #d8d6d0; cursor: pointer; padding: 4px;
+          font: 600 11px/1.15 var(--mono); box-shadow: inset 0 -3px 0 rgba(0,0,0,.35); }
+  .mpad:hover { filter: brightness(1.25); }
+  .mpad.on { background: var(--accent); color: #1a1205; }
+  .keys { position: relative; margin-top: 14px; height: 92px; display: flex; }
+  .wk { flex: 1; background: #fbfaf7; border: 1px solid #bdb9ae; border-radius: 0 0 5px 5px; margin-right: -1px; }
+  .bk { position: absolute; top: 0; width: 3.6%; height: 56px; background: #1c1c1f; border-radius: 0 0 4px 4px; }
+  .keylbl { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); padding: 4px 10px; border-radius: 5px;
+            background: rgba(29,29,31,.86); color: #f3f1ec; font: 600 11px var(--mono); white-space: nowrap; }
+  footer { color: var(--faint); font: 11px var(--mono); padding: 0 28px 24px; }
+</style>
+</head>
+<body>
+<header><h1>My lil Live set · controllers</h1><span class="sub" id="sub">connecting…</span></header>
+<div id="banner"></div>
+<main>
+  <section>
+    <p class="tag">Launchpad Mini MK3 <b id="lphw"></b><span class="pagename" id="pagename"></span></p>
+    <div class="lp-wrap"><div class="rowname" id="rownames"></div><div class="lp" id="lp"></div></div>
+  </section>
+  <section>
+    <p class="tag">Arturia MiniLab 3</p>
+    <div class="ml">
+      <div class="top">
+        <div><h2><span id="mltitle">MiniLab 3</span><span class="modes" id="modes"><button data-mode="mix">drums + mix</button><button data-mode="acid">acid bass</button></span></h2><div class="knobs" id="knobs"></div></div>
+        <div><h2><span>faders</span></h2><div class="faders" id="faders"></div></div>
+      </div>
+      <div class="pads" id="mpads"></div>
+      <div class="keys" id="keys"></div>
+    </div>
+  </section>
+</main>
+<footer>click a pad = press it · drag a knob up/down or a fader = move it in Rack (the hardware control then waits for pickup)</footer>
+<script>
+const LP = { 5: '#ff4433', 9: '#ff8c1a', 13: '#ffd93a', 21: '#40d957', 37: '#3cc7ff', 45: '#3b6dff', 49: '#9a5cff', 53: '#ff5fd2' };
+const $ = id => document.getElementById(id);
+const hold = {};           // cc -> time until which polling leaves a dragged control alone
+let shape = '', last = null;
+
+const post = (path, body) => fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  .then(r => r.json()).catch(() => ({ ok: false }));
+
+function buildLaunchpad(L) {
+  const lp = $('lp'); lp.innerHTML = '';
+  const names = $('rownames'); names.innerHTML = '<div></div>';
+  const arrows = { 2: [-1, '&#9664;', 'previous page'], 3: [1, '&#9654;', 'next page'] };   // top row 3rd/4th = left/right arrows
+  const modeBtn = { 5: ['mix', 'D', 'Drums button: MiniLab = drums + mix map'], 6: ['acid', 'K', 'Keys button: MiniLab = Acid Bass'] };
+  for (let c = 0; c < 8; c++) lp.insertAdjacentHTML('beforeend', modeBtn[c]
+    ? `<button class="round mode" data-mode="${modeBtn[c][0]}" title="${modeBtn[c][2]}">${modeBtn[c][1]}</button>`
+    : arrows[c]
+    ? `<button class="round arrow" data-dir="${arrows[c][0]}" title="${arrows[c][2]}">${arrows[c][1]}</button>`
+    : '<div class="round"></div>');
+  lp.querySelectorAll('.arrow').forEach(b => b.onclick = async () => { await post('/page', { dir: +b.dataset.dir }); poll(); });
+  lp.querySelectorAll('.mode').forEach(b => b.onclick = () => setMode(b.dataset.mode));
+  lp.insertAdjacentHTML('beforeend', '<div></div>');
+  const byBase = Object.fromEntries(L.rows.map(r => [r.base, r]));                      // rows sit on their hardware row; a missing row stays empty
+  const rows = [...[81, 71, 61, 51, 41, 31, 21].map(b => byBase[b] ? { name: byBase[b].name, color: LP[byBase[b].color] || '#888', base: b, labels: byBase[b].labels }
+                                                    : { name: '', color: 'transparent', base: b, labels: [] }),
+                { name: `moves ${L.bank + 1}/${L.banks}`, color: LP[L.color] || '#888', base: 11, labels: null }];
+  for (const r of rows) {
+    names.insertAdjacentHTML('beforeend', `<div>${r.name}<i style="background:${r.color}"></i></div>`);
+    for (let c = 0; c < 8; c++) {
+      const note = r.base + c, b = document.createElement('button');
+      b.className = 'pad'; b.dataset.note = note;
+      const fx = r.labels ? null : L.fx.find(f => f.note === note);
+      const label = r.labels ? r.labels[c] : fx && fx.name;
+      if (label) { b.textContent = r.labels ? label : label.replace(/\w{9,}/g, w => w.slice(0, 5) + '\u00AD' + w.slice(5));   // long move names break with a hyphen
+                   b.style.hyphens = 'manual'; b.style.background = r.color; if (!r.labels) b.classList.add('fx'); b.dataset.color = r.color;
+                   b.title = `${r.name}: ${label}`; b.onclick = () => press(b, note); }
+      else b.disabled = true;
+      lp.appendChild(b);
+    }
+    lp.insertAdjacentHTML('beforeend', r.base === 11                  // end of the moves row: next bank of moves
+      ? `<button class="round bank${L.bank ? ' lit' : ''}" title="more moves: bank ${(L.bank + 1) % L.banks + 1} of ${L.banks}">&#9654;</button>`
+      : r.base === 21                                               // end of the drums row: My lil Drums (drum machine) on / off
+      ? `<button class="round machine${L.machine ? ' lit' : ''}" title="drum machine (My lil Drums) on / off: the drums row pads are the record's drums">&#9679;</button>`
+      : '<div class="round"></div>');
+  }
+  lp.querySelectorAll('.bank').forEach(b => b.onclick = async () => { await post('/bank', {}); poll(); });
+  lp.querySelectorAll('.machine').forEach(b => b.onclick = async () => { await post('/machine', {}); poll(); });
+}
+function updateLaunchpad(L) {
+  $('lphw').textContent = L.hw ? '· connected' : '· not plugged in (page only)';
+  $('pagename').textContent = `page ${L.page + 1}/${L.pages.length} · ${L.pages[L.page]}`;
+  document.querySelectorAll('.arrow').forEach(b => { const p = L.page + +b.dataset.dir, ok = p >= 0 && p < L.pages.length;
+    b.classList.toggle('lit', ok); b.disabled = !ok; b.title = ok ? `to page ${p + 1}: ${L.pages[p]}` : 'no page that way'; });
+  const on = new Set(L.rows.filter(r => r.on !== null && r.on !== undefined).map(r => r.base + r.on));
+  L.fx.filter(f => f.on).forEach(f => on.add(f.note));
+  document.querySelectorAll('.pad[data-color]').forEach(b => b.classList.toggle('on', on.has(+b.dataset.note)));
+  document.querySelectorAll('.machine').forEach(b => b.classList.toggle('lit', !!L.machine));
+}
+async function press(b, note) {
+  b.classList.add('flash'); setTimeout(() => b.classList.remove('flash'), 160);
+  const r = await post('/press', { note }); if (!r.ok) flashBanner('busy or not taken: try again');
+  poll();
+}
+
+function knobSvg(pos) {
+  const a = pos === null ? -135 : -135 + 270 * pos / 127, rad = (a - 90) * Math.PI / 180;
+  const arc = (from, to) => { const p = t => [29 + 22 * Math.cos((t - 90) * Math.PI / 180), 29 + 22 * Math.sin((t - 90) * Math.PI / 180)];
+    const [x1, y1] = p(from), [x2, y2] = p(to); return `M${x1} ${y1} A22 22 0 ${to - from > 180 ? 1 : 0} 1 ${x2} ${y2}`; };
+  return `<svg viewBox="0 0 58 58"><path d="${arc(-135, 135)}" stroke="#cfccc3" stroke-width="4" fill="none" stroke-linecap="round"/>
+    ${pos === null ? '' : `<path d="${arc(-135, Math.max(-134, a))}" stroke="var(--accent)" stroke-width="4" fill="none" stroke-linecap="round"/>`}
+    <circle cx="29" cy="29" r="16" fill="#26262a"/><line x1="29" y1="29" x2="${29 + 13 * Math.cos(rad)}" y2="${29 + 13 * Math.sin(rad)}"
+    stroke="#f3f1ec" stroke-width="3" stroke-linecap="round"/></svg>`;
+}
+function drag(el, ctl, kind) {
+  let start, startPos, sent = 0, timer = null, pos = ctl.pos;
+  const send = (final) => { post('/set', { cc: ctl.cc, value: pos, log: final === true }); sent = Date.now(); timer = null; };   // only the release is logged
+  el.onpointerdown = e => {
+    if (ctl.pos === null) return;
+    el.setPointerCapture(e.pointerId); start = e.clientY; startPos = pos = ctl.pos;
+    const move = ev => {
+      if (kind === 'knob') pos = Math.max(0, Math.min(127, Math.round(startPos + (start - ev.clientY) * 0.7)));
+      else { const r = el.getBoundingClientRect(); pos = Math.max(0, Math.min(127, Math.round(127 * (r.bottom - 9 - ev.clientY) / (r.height - 18)))); }
+      ctl.pos = pos; hold[ctl.cc] = Date.now() + 1500; paintCtl(ctl, kind);
+      if (Date.now() - sent > 70) send(); else if (!timer) timer = setTimeout(send, 70);
+    };
+    el.onpointermove = move; if (kind === 'fader') move(e);
+    el.onpointerup = el.onpointercancel = () => { el.onpointermove = null; if (timer) { clearTimeout(timer); } send(true); hold[ctl.cc] = Date.now() + 1200; };
+  };
+}
+function paintCtl(c, kind) {
+  const el = document.querySelector(`[data-cc="${c.cc}"]`); if (!el) return;
+  if (kind === 'knob') el.querySelector('.svg').innerHTML = knobSvg(c.pos);
+  else el.querySelector('.cap').style.bottom = `${c.pos === null ? 0 : c.pos / 127 * 132}px`;
+  el.querySelector('.val').textContent = c.pos === null ? '' : (c.value ?? '');
+}
+function buildMinilab(M) {
+  $('mltitle').textContent = 'MiniLab mode';
+  $('knobs').innerHTML = M.knobs.map((k, i) => `<div class="knob${k.pos === null ? ' none' : ''}" data-cc="${k.cc}">
+      <div class="svg"></div><div class="lbl">${k.label || `knob ${i + 1} · free`}</div><div class="val"></div></div>`).join('');
+  $('faders').innerHTML = M.faders.map((f, i) => `<div class="fader" data-cc="${f.cc}">
+      <div class="track"><div class="cap"></div></div><div class="lbl">${f.label || `fader ${i + 1}`}</div><div class="val"></div></div>`).join('');
+  M.knobs.forEach(k => { drag(document.querySelector(`[data-cc="${k.cc}"] .svg`), k, 'knob'); });
+  M.faders.forEach(f => { drag(document.querySelector(`[data-cc="${f.cc}"] .track`), f, 'fader'); });
+  const banks = []; for (let i = 0; i < M.pads.length; i += 8) banks.push(M.pads.slice(i, i + 8));
+  $('mpads').innerHTML = banks.map((b, n) => `<div class="bank">pads ${'AB'[n]}</div>` +
+      b.map(p => `<button class="mpad" data-pad="${p.i}" title="pad ${p.i % 8 + 1} bank ${'AB'[n]}">${p.label}</button>`).join('')).join('');
+  document.querySelectorAll('.mpad').forEach(b => b.onclick = async () => { await post('/set', { pad: +b.dataset.pad }); poll(); });
+  const white = 15, black = [0, 1, 3, 4, 5, 7, 8, 10, 11, 12];   // 25 keys C..C: black keys after these white keys
+  $('keys').innerHTML = Array.from({ length: white }, () => '<div class="wk"></div>').join('') +
+      black.map(w => `<div class="bk" style="left:calc(${(w + 1) * 100 / white}% - 1.8%)"></div>`).join('') +
+      `<div class="keylbl">keys: ${M.keys}</div>`;
+}
+async function setMode(m) {
+  flashBanner(`switching the MiniLab to ${m === 'acid' ? 'Acid Bass' : 'drums + mix'}…`); await post('/mode', { mode: m }); poll(); }
+document.querySelectorAll('#modes button').forEach(b => b.onclick = () => setMode(b.dataset.mode));
+function updateMinilab(M) {
+  document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle(b.classList.contains('round') ? 'lit' : 'on', b.dataset.mode === M.mode));
+  const now = Date.now();
+  M.knobs.forEach(k => { if (!(hold[k.cc] > now)) { const el = document.querySelector(`[data-cc="${k.cc}"] .svg`); paintCtl(k, 'knob'); rebind(k, 'knob'); } });
+  M.faders.forEach(f => { if (!(hold[f.cc] > now)) { paintCtl(f, 'fader'); rebind(f, 'fader'); } });
+  M.pads.forEach(p => { const b = document.querySelector(`.mpad[data-pad="${p.i}"]`); if (b) b.classList.toggle('on', p.on); });
+}
+function rebind(c, kind) { const el = document.querySelector(`[data-cc="${c.cc}"] ${kind === 'knob' ? '.svg' : '.track'}`); if (el) drag(el, c, kind); }
+
+let bannerTimer;
+function flashBanner(t) { const b = $('banner'); b.textContent = t; b.style.display = 'block'; clearTimeout(bannerTimer);
+  bannerTimer = setTimeout(() => { if (!last || last.rack) b.style.display = 'none'; }, 2500); }
+async function poll() {
+  let s;
+  try { s = await (await fetch('/state', { cache: 'no-store' })).json(); }
+  catch { $('sub').textContent = 'page server not answering: is pads.py running?'; return; }
+  if (last && s.v && last.v && s.v !== last.v) { location.reload(); return; }   // board.html changed on disk: load the new page
+  last = s;
+  const key = JSON.stringify([s.launchpad.page, s.launchpad.rows.map(r => [r.name, r.labels]), s.launchpad.fx.map(f => f.name),
+                              s.minilab && [s.minilab.mode, s.minilab.knobs.map(k => k.label), s.minilab.pads.length]]);
+  if (key !== shape) { shape = key; buildLaunchpad(s.launchpad); if (s.minilab) buildMinilab(s.minilab); }
+  updateLaunchpad(s.launchpad); if (s.minilab) updateMinilab(s.minilab);
+  $('sub').textContent = s.rack ? `live · ${new Date().toLocaleTimeString()}` : 'Rack not answering';
+  const b = $('banner'); if (!s.rack) { b.textContent = `Rack not answering: ${s.error || ''}`; b.style.display = 'block'; }
+  else if (b.textContent.startsWith('Rack')) b.style.display = 'none';
+}
+poll(); setInterval(poll, 500);
+</script>
+</body>
+</html>

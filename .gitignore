@@ -6,3 +6,13 @@ plugin.dylib
 *.o
 *.d
 __pycache__/
+
+# tools/live runtime (logs, backups, stop/state files, test audio)
+tools/live/*.log
+tools/live/*.bak-*
+tools/live/*.bak.json
+tools/live/*.stop
+tools/live/*.wav
+tools/live/page.txt
+tools/live/minilab.mode
+tools/live/drums_level.json

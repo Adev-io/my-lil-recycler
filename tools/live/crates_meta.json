@@ -1,0 +1,159 @@
+{
+ "peg": {
+  "crate": "C:\\Users\\Arikl\\Desktop\\uvr-loops\\crates\\peg-crate",
+  "key": 7,
+  "minor": false,
+  "stems": [
+   "drums",
+   "bass",
+   "guitar",
+   "piano",
+   "other",
+   "vocals",
+   "backing"
+  ],
+  "bpm": 115,
+  "phase": 2,
+  "phase_scores": [
+   0.454,
+   -0.123,
+   0.716,
+   -0.046
+  ],
+  "loops": 30,
+  "files": 170,
+  "tempo_range": [
+   116.65,
+   119.04
+  ]
+ },
+ "winning": {
+  "crate": "C:\\Users\\Arikl\\Desktop\\uvr-loops\\crates\\winning-crate",
+  "key": 10,
+  "minor": false,
+  "stems": [
+   "drums",
+   "bass",
+   "guitar",
+   "piano",
+   "other",
+   "vocals"
+  ],
+  "bpm": 115,
+  "phase": 2,
+  "phase_scores": [
+   0.312,
+   0.022,
+   0.349,
+   0.318
+  ],
+  "loops": 8,
+  "files": 43,
+  "tempo_range": [
+   115.95,
+   116.26
+  ]
+ },
+ "westend": {
+  "crate": "C:\\Users\\Arikl\\Desktop\\uvr-loops\\crates\\westend-crate",
+  "key": 7,
+  "minor": false,
+  "stems": [
+   "drums",
+   "bass",
+   "other",
+   "vocals"
+  ],
+  "bpm": 111,
+  "phase": 0,
+  "phase_scores": [
+   0.505,
+   0.037,
+   0.335,
+   0.122
+  ],
+  "loops": 13,
+  "files": 49,
+  "tempo_range": [
+   113.1,
+   114.98
+  ]
+ },
+ "arrow": {
+  "crate": "C:\\Users\\Arikl\\Desktop\\uvr-loops\\crates\\arrow-crate",
+  "key": 4,
+  "minor": false,
+  "stems": [
+   "drums",
+   "bass",
+   "other",
+   "vocals"
+  ],
+  "bpm": 88,
+  "phase": 0,
+  "phase_scores": [
+   0.365,
+   0.195,
+   0.253,
+   0.187
+  ],
+  "loops": 7,
+  "files": 28,
+  "tempo_range": [
+   88.91,
+   89.07
+  ]
+ },
+ "mcferrin": {
+  "crate": "C:\\Users\\Arikl\\Desktop\\uvr-loops\\crates\\mcferrin-crate",
+  "key": 2,
+  "minor": true,
+  "stems": [
+   "drums",
+   "bass",
+   "other",
+   "vocals"
+  ],
+  "bpm": 97,
+  "phase": 3,
+  "phase_scores": [
+   0.034,
+   0.274,
+   0.203,
+   0.489
+  ],
+  "loops": 9,
+  "files": 28,
+  "tempo_range": [
+   94.76,
+   99.21
+  ]
+ },
+ "lowdown2": {
+  "crate": "C:\\Users\\Arikl\\Desktop\\uvr-loops\\crates\\lowdown2-crate",
+  "key": 9,
+  "minor": false,
+  "stems": [
+   "drums",
+   "bass",
+   "guitar",
+   "piano",
+   "other",
+   "vocals"
+  ],
+  "bpm": 115,
+  "phase": 2,
+  "phase_scores": [
+   0.207,
+   0.319,
+   0.545,
+   -0.071
+  ],
+  "loops": 19,
+  "files": 107,
+  "tempo_range": [
+   114.76,
+   118.15
+  ]
+ }
+}
