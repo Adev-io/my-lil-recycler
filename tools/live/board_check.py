@@ -19,4 +19,17 @@ assert m0[16] == m1[16] and m0[18] == m1[18] and m0[16][0] == S.DRUMS           
 import synths                                                               # arp scale per song page (2026-11-06 arp + acid)
 assert set(S.SCALES) == {0, 1} and all(len(set(p)) == 7 and all(0 <= c < 12 for c in p) for p in S.SCALES.values()), S.SCALES
 assert synths.mask_of((1, 2, 4, 6, 7, 9, 11)) == 2774
+import json
+calls, real_call = [], synths.S.call                                        # set_scale writes the arp's module data only, never params, and only when needed
+def fake_arp(locked, mask):
+    st = {'id': 1, 'params': [{'id': i, 'value': 0.0} for i in range(19)], 'data': {'dir': 2, 'gateOuts': True, 'passThrough': False, 'type': 3, 'locked': locked, 'lockedMask': mask}}
+    return lambda name, args=None: (calls.append((name, args)), json.dumps(st))[1]
+try:
+    synths.S.call = fake_arp(False, 0); assert synths.set_scale(0) == 2774
+    sets = [a for n, a in calls if n == 'vcvrack_set_module_state']; assert len(sets) == 1, calls
+    s = sets[0]['state']; assert 'params' not in s and sets[0]['id'] == synths.ARP, s
+    assert s['data'] == {'dir': 2, 'gateOuts': True, 'passThrough': False, 'type': 3, 'locked': True, 'lockedMask': 2774}, s['data']
+    calls.clear(); synths.S.call = fake_arp(True, 2774); assert synths.set_scale(0) == 2774 and synths.follow(lambda: 1) == 2774
+    assert not [1 for n, a in calls if n == 'vcvrack_set_module_state'], calls
+finally: synths.S.call = real_call
 print('ok')

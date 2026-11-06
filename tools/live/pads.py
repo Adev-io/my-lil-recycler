@@ -70,7 +70,7 @@ def turn(d):                                                    # arrow: next / 
     p = state['page'] + d
     if not 0 <= p < len(sections.PAGES) or state['busy']: return False
     state['page'] = p; open(os.path.join(here, 'page.txt'), 'w').write(str(p))   # the MiniLab (minilab.py, page) follows it
-    threading.Thread(target=synths.set_scale, args=(p,), daemon=True).start()     # the arp's keys follow the song
+    threading.Thread(target=lambda: synths.follow(lambda: state['page']), daemon=True).start()     # the arp's keys follow the song
     LOG.write(time.ctime() + f" page {p + 1} {sections.PAGES[p]['name']}\n"); paint(); return True
 def sweep(to, gen, decks):                                      # the song's decks: base -> target over SWEEP_SECS, stops if another move takes over
     n = int(fx.SWEEP_SECS / fx.STEP)
@@ -198,8 +198,12 @@ def on_msg(msg):
     elif msg.type == 'control_change' and msg.value and msg.control == fx.BANK_CC: flip()
     elif msg.type == 'control_change' and msg.value and msg.control == MACHINE_CC: threading.Thread(target=machine, daemon=True).start()
 open(os.path.join(here, 'page.txt'), 'w').write('0')
-try: sections.base(); synths.set_scale(0); state['on'] = [sections.now(p['rows']) for p in sections.PAGES]
+try: sections.base(); state['on'] = [sections.now(p['rows']) for p in sections.PAGES]
 except Exception: LOG.write(traceback.format_exc())
+def _scale():
+    try: synths.follow(lambda: state['page'])
+    except Exception: LOG.write(traceback.format_exc())
+threading.Thread(target=_scale, daemon=True).start()           # the arp's keys follow the page on show (own thread: a slow arp must not hold startup)
 inp = lp(mido.get_input_names(), 'LPMiniMK3 MIDI'); inp = inp and mido.open_input(inp, callback=on_msg)
 import board; board.start(press, state, turn, minilab, flip, machine)
 LOG.write(time.ctime() + f" start rows {state['on']} fx row {list(fx.FX.values())} launchpad {'on' if out else 'missing: page only'}"
