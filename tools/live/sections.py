@@ -75,7 +75,8 @@ P = lambda f: CR.replace('\\', '/') + '/' + f
 ROWS = {
     81: dict(name='vocals', slot=3, level=1.0, color=53,               # Ari kept pads 1-2 (09:10); 2026-11-06 + the first verse he sings and rolls
              samples=[CHOP_V, P('6-vocals-14-115bpm.wav'), VC + '6-vocals-02_verse-115bpm-chop4.wav', P('6-vocals-03-115bpm.wav'),
-                      VC + '6-vocals-02_build-115bpm-chop4.wav', VC + '6-vocals-03_heyboy-115bpm-chop4.wav']),   # "Baby's into running around...", verse 03, "Baby's" roll build, "Hey boy" roll
+                      VC + '6-vocals-02_build-115bpm-chop4.wav', VC + '6-vocals-03_heyboy-115bpm-chop4.wav',
+                      P('6-vocals-12-115bpm.wav'), P('6-vocals-04-115bpm.wav')]),   # verse, verse 03, "Baby's" roll, "Hey boy" roll, choir "Oh wonder... ooh" (12), backing choir "Oh wonder" (04)
     71: dict(name='keys',   slot=1, level=1.2, color=45, samples=[P(f'4-piano-{n}-115bpm.wav') for n in ('14', '15', '16', '13', '03', '09', '10', '17')]),
     61: dict(name='bridge keys', slot=1, level=1.2, color=21,          # same slot as keys: a bridge pad swaps the row 2 piano out
              samples=[P(f'4-piano-{n}-115bpm-chop4.wav') for n in ('08', '09', '10', '13')]),   # 4-bar bridge halves: 08 C#-C-B-G#, 09/10 F#-B, 13 D-C#-C-A#
