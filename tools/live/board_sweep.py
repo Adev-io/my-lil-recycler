@@ -1,6 +1,6 @@
 # Presses every button on the virtual console (http://127.0.0.1:2700) through the page server, as a click would: both arrows,
-# every sample pad on every page, the bank button, every move in every bank, the drum machine button, the three MiniLab mode
-# buttons, every labelled MiniLab knob / fader in every mode and every MiniLab pad. One PASS / FAIL line per button.
+# every sample pad on every page, the bank button, every move in every bank, the drum machine button, every Synths page pad,
+# the three MiniLab mode buttons, every labelled MiniLab knob / fader in every mode and every MiniLab pad. One PASS / FAIL line per button.
 # Saves the rig first (decks A/B/C, Arp, Acid, Mixer, Drums, tempo, page, bank, MiniLab mode) and puts it back at the end.
 # Audible while it runs (several minutes). Run with Rack + pads.py up, no move held: py -3.11 board_sweep.py
 import json, os, sys, time, urllib.request
@@ -30,6 +30,7 @@ def prm(m, i): return prms(m)[i]
 def path(d, k): return os.path.basename(json.loads(S.call('vcvrack_get_module_state', {'id': d}))['data']['slots'][k]['path'])
 def lit(base): return next(r['on'] for r in get()['launchpad']['rows'] if r['base'] == base)
 def fxon(name): return next(f['on'] for f in get()['launchpad']['fx'] if f['name'] == name)
+def rlit(base): return next(r['lit'] for r in get()['launchpad']['rows'] if r['base'] == base)   # Synths page: pad indexes lit
 def mark(): return len(open(LOGF, encoding='utf-8', errors='replace').readlines())
 def logged(n, text): return any(text in l for l in open(LOGF, encoding='utf-8', errors='replace').readlines()[n:])
 def snap(): return {m: prms(m) for m in NAMES}                                   # every param of the modules the console moves
@@ -89,8 +90,8 @@ try:
         'reverse':      (0, lambda b, d: all(d[S.A][36 + k] == 1.0 for k in range(4)) and all(d[S.B][36 + k] == 0.0 for k in range(4))),
         'drums only':   (0, lambda b, d: all(d[S.MIX][k] == 0.0 for k in (1, 2, 3, 5, 6)) and d[S.MIX][0] == b[S.MIX][0] and d[S.MIX][4] == b[S.MIX][4]),
         'no drums':     (0, lambda b, d: d[S.MIX][0] == 0.0 and d[S.MIX][4] == 0.0 and d[S.MIX][2] == b[S.MIX][2]),
-        'acid in/out':  (0, lambda b, d: (b[S.MIX][1] > 0.001) != (d[S.MIX][1] > 0.001)),
-        'arp in/out':   (0, lambda b, d: (b[S.MIX][6] > 0.001) != (d[S.MIX][6] > 0.001)),
+        'acid in/out':  (fx.bars_secs(2) + 1.5, lambda b, d: (b[S.MIX][1] > 0.001) != (d[S.MIX][1] > 0.001)),   # 2-bar entries
+        'arp in/out':   (fx.bars_secs(2) + 1.5, lambda b, d: (b[S.MIX][6] > 0.001) != (d[S.MIX][6] > 0.001)),
         'voice in/out': (0, lambda b, d: (b[S.MIX][5] > 0.001) != (d[S.MIX][5] > 0.001)),
         'acid sweep':   (2.5, lambda b, d: d[S.ACID][1] > b[S.ACID][1] + 0.05),
         'no bass':      (0, lambda b, d: b[S.A][14] > 0 and d[S.A][14] == 0.0),
@@ -109,11 +110,11 @@ try:
                 back = diff(b, a)
                 check(f'bank {bk + 1} {name}', ok1 and ok2 and on1 != on0 and effect(b, d) and on2 == on0 and not back,
                       f'lit {on0}->{on1}->{on2}' + (f' not back: {back}' if back else '') + ('' if effect(b, d) else ' no effect'))
-            elif name == 'dnb':                                                  # tempo up to the peak; again = release back to fx.BPM
+            elif name == 'dnb':                                                  # tempo up to the peak; again = release back to the tempo before
                 ok1 = press(note); time.sleep(4); t1, on1 = fx.bpm(), fxon(name)
                 ok2 = press(note); time.sleep(fx.DNB['release'] + 1.5); a, on2 = snap(), fxon(name)
                 back = diff(b, a, skip={(fx.CLOCK, 0)})
-                check(f'bank {bk + 1} dnb', ok1 and ok2 and on1 and t1 > b[fx.CLOCK][0] and not on2 and a[fx.CLOCK][0] == fx.BPM and not back,
+                check(f'bank {bk + 1} dnb', ok1 and ok2 and on1 and t1 > b[fx.CLOCK][0] and not on2 and a[fx.CLOCK][0] == b[fx.CLOCK][0] and not back,
                       f'{b[fx.CLOCK][0]} -> {t1} -> {a[fx.CLOCK][0]} BPM' + (f' not back: {back}' if back else ''))
             elif name == 'transition':                                           # Lowdown on show: TOOM (deck B) sweeps out, Lowdown in
                 ok1 = press(note); on1 = fxon(name); time.sleep(fx.TRANS_SECS + 2.5); a, on2 = snap(), fxon(name)
@@ -138,6 +139,39 @@ try:
     r1 = post('/machine'); a = (prm(S.DRUMS, 5), get()['launchpad']['machine'])
     r2 = post('/machine'); b = (prm(S.DRUMS, 5), get()['launchpad']['machine'])
     check('drum machine button off / on', r1['on'] is False and a == (0.0, False) and r2['on'] is True and near(b[0], l0) and b[1] is True, f'{round(l0, 3)} -> {a} -> {b}')
+
+    # ---- c2) every Synths pad (page 3). It acts on the song last shown: TOOM here (page 3 is reached through page 2).
+    # Hold pads: a click holds, a second click lets go. Others: one click, its param checked. Auto / phrase: put back after.
+    page(1); page(len(L0['pages']) - 1); P = synths.pads(1)
+    rows3 = {r['base']: r for r in get()['launchpad']['rows']}
+    AC, AR = (lambda i: prm(S.ACID, i)), (lambda i: prm(synths.ARP, i))
+    phrase0 = next((31 + i for i in rlit(31) if i in (2, 3)), None)
+    for note in sorted(P, key=lambda n: (-(n // 10), n)):
+        label, kind, arg = P[note]; base = note // 10 * 10 + 1; i = note - base; n0 = mark()
+        tag = f'Synths {rows3[base]["name"]} pad {i + 1} ({label})'; named = rows3[base]['labels'][i] == label
+        if kind in ('fill', 'roll', 'octjump'):
+            o0 = AR(16)
+            ok1 = press(note); on = i in rlit(base)
+            d = (AC(34), AC(33)) if kind == 'fill' else (AR(21), AR(20)) if kind == 'roll' else AR(16)
+            ok2 = press(note); off = i not in rlit(base)
+            a = AC(34) if kind == 'fill' else AR(21) if kind == 'roll' else AR(16)
+            want = (min(4.0, o0 + 1), o0) if kind == 'octjump' else ((1.0, float(arg)), 0.0)   # octjump has no arg
+            check(tag, named and ok1 and ok2 and on and off and d == want[0] and a == want[1] and logged(n0, f'synths {label} let go'), f'held {d} let go {a} (want {want}) lit {on} -> {not off}')
+        elif kind in ('auto', 'phrase'):
+            was = i in rlit(base); ok1 = press(note); on = i in rlit(base)
+            if kind == 'auto': press(note)
+            else: phrase0 and press(phrase0)
+            back = (i in rlit(base)) == was
+            check(tag, named and ok1 and on and back and logged(n0, f'synths {label} held'), f'lit {was} -> {on}, back {back}')
+        else:
+            ok = press(note); lt = i in rlit(base)
+            got = {'pattern': lambda: AC(24), 'mutate': lambda: AC(synths.A_AMOUNT), 'undo': lambda: AC(synths.A_UNDO), 'keep': lambda: AC(synths.A_KEEP),
+                   'transpose': lambda: AC(synths.A_TRANSPOSE), 'dir': synths.arp_dir, 'oct': lambda: AR(synths.R_OCT), 'int': lambda: AR(synths.R_INT)}[kind]()
+            want = 0.0 if kind in ('undo', 'keep') else arg                     # a tap: the button is let go again
+            lit_ok = lt if kind not in ('mutate', 'undo', 'keep') else True       # moves are actions, not states: never lit
+            check(tag, named and ok and got == want and lit_ok and logged(n0, f'synths {label} held'), f'{got} (want {want}) lit {lt}')
+    for m in (synths.ARP, S.ACID): S.call('vcvrack_set_module_state', {'id': m, 'state': saved[m]})   # the Synths pads changed patterns, transpose, arp
+    page(0)
 
     # ---- d) MiniLab mode buttons (each launches acid.py / minilab.py; with no MiniLab plugged in they exit, the page relabels anyway)
     for m, f0 in (('acid', 'cutoff'), ('env', 'filter attack'), ('mix', 'vocals vol')):
@@ -186,6 +220,12 @@ finally:
         bank(0)
         if any(f['on'] for f in get()['launchpad']['fx'] if not f['name'].endswith('in/out')): press(18)   # clean lets go of a held move
     except Exception as e: print('clean failed', e)
+    try:                                                                         # Synths page: let go of a held fill, auto change off
+        page(len(L0['pages']) - 1)
+        for b3 in (61, 31):
+            for i in rlit(b3):
+                if b3 == 61 or i in (0, 1): press(b3 + i)                        # auto change pads 3-4 = phrase length, lit by design
+    except Exception as e: print('Synths let go failed', e)
     post('/mode', {'mode': saved_mode}); bank(saved_bank); page(saved_page); time.sleep(2)   # page turn first: the arp scale write settles
     for d, s in saved.items(): S.call('vcvrack_set_module_state', {'id': d, 'state': s})
     for m, p in saved_p.items(): S.call('vcvrack_set_params', {'moduleId': m, 'params': [{'id': k, 'value': v} for k, v in p.items()]})

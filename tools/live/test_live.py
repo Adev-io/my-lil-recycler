@@ -1,9 +1,9 @@
 # Live end-to-end test of the set controls, driven through the page server (the same path as a click or a Launchpad press).
-# Saves the rig first (decks A/B/C, Mixer, Drums, Acid, tempo, page, bank, MiniLab mode) and puts it back at the end.
-# Audible while it runs (~4 min). Run with Rack + pads.py up: py -3.11 test_live.py
+# Saves the rig first (decks A/B/C, Arp, Acid, Mixer, Drums, Triple, tempo, page, bank, MiniLab mode) and puts it back at the end.
+# Audible while it runs (~6 min). Run with Rack + pads.py up: py -3.11 test_live.py
 import json, os, sys, time, urllib.request, urllib.error
 here = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, here)
-import sections as S, fx, maps
+import sections as S, fx, maps, synths
 C, U, URL = fx.C, S.U, 'http://127.0.0.1:2700'
 res = []
 def check(name, ok, info=''):
@@ -29,10 +29,14 @@ def path(d, k): return os.path.basename(json.loads(S.call('vcvrack_get_module_st
 def loud(d): return json.loads(S.call('vcvrack_measure', {'moduleId': d, 'outputId': 8, 'seconds': 0.5}))['lufs']
 def lit(name): return next(r['on'] for r in get()['launchpad']['rows'] if r['name'] == name)
 def fxon(name): return next(f['on'] for f in get()['launchpad']['fx'] if f['name'] == name)
+def row(name): return next(r for r in get()['launchpad']['rows'] if r['name'] == name)   # Synths page rows: 'lit' = pad indexes lit
+near = lambda a, b, tol=0.002: abs(a - b) <= tol
+ENTRY_KNOB = {'acid in/out': fx.acid_cutoff, 'arp in/out': synths.arp_gate}               # what each 2-bar entry ramps, then puts back
 
 # ---- save the rig
 saved = {d: json.loads(S.call('vcvrack_get_module_state', {'id': d})) for d in (S.A, S.B, C)}
-saved_p = {m: {x['id']: x['value'] for x in json.loads(S.call('vcvrack_get_params', {'moduleId': m}))} for m in (S.MIX, S.DRUMS, S.ACID)}
+saved_vs = {m: json.loads(S.call('vcvrack_get_module_state', {'id': m})) for m in (synths.ARP, S.ACID)}   # arp dir + Acid patterns (keep writes one)
+saved_p = {m: {x['id']: x['value'] for x in json.loads(S.call('vcvrack_get_params', {'moduleId': m}))} for m in (S.MIX, S.DRUMS, S.ACID, synths.TRI)}
 g0 = get(); saved_page, saved_bank, saved_mode, saved_bpm = g0['launchpad']['page'], g0['launchpad']['bank'], g0['minilab']['mode'], fx.bpm()
 print('saved rig: page', saved_page + 1, 'bank', saved_bank + 1, 'mode', saved_mode, 'bpm', saved_bpm, 'strips', st())
 try:
@@ -81,10 +85,10 @@ try:
     press(15); s1 = st(); press(15)
     check('no drums silences machine + stem only', s1[0] == 0 and s1[4] == 0 and s1[2] == s0[2])
     check('no drums release restores', st() == s0)
-    p0 = S.current_drum_pattern(); press(16); time.sleep(9); b1, p1 = fx.bpm(), S.current_drum_pattern()
+    p0, b0 = S.current_drum_pattern(), fx.bpm(); press(16); time.sleep(9); b1, p1 = fx.bpm(), S.current_drum_pattern()
     press(16); time.sleep(9.5)
     check('dnb: 140 BPM + break', b1 == 140.0 and p1 == fx.BREAK, f'{b1} BPM pattern {p1}')
-    check('dnb release: 120 BPM, beat + strips back', fx.bpm() == 120.0 and S.current_drum_pattern() == p0 and st() == s0, f'{fx.bpm()} pattern {S.current_drum_pattern()}')
+    check('dnb release: tempo from before, beat + strips back', fx.bpm() == b0 and S.current_drum_pattern() == p0 and st() == s0, f'{b0} -> {fx.bpm()} BPM pattern {S.current_drum_pattern()}')
     press(71); page(1); press(17); time.sleep(18)
     check('transition to TOOM: Lowdown out, TOOM pad 1 rows in', lv(S.A) == [0.0] * 4 and lv(S.B)[1] == 1.0 and lv(S.B)[0] == 1.0 and path(C, 0).startswith('1-drums-05') and st()[2] == U, f'A {lv(S.A)} B {lv(S.B)}')
     page(0); press(17); time.sleep(18)
@@ -94,9 +98,20 @@ try:
 
     # ---- bank 2
     bank(1); press(81)
-    for note, (k, _), name in ((11, fx.STRIP_TOGGLE['acid in/out'], 'acid'), (12, fx.STRIP_TOGGLE['arp in/out'], 'arp'), (13, fx.STRIP_TOGGLE['voice in/out'], 'voice')):
-        a = st()[k]; press(note); b = st()[k]; press(note)
-        check(f'{name} in/out toggles strip {k + 1}', (a == 0) != (b == 0) and st()[k] == a, f'{a} -> {b} -> {st()[k]}')
+    for note, name in ((11, 'acid in/out'), (12, 'arp in/out')):      # 2-bar entries: strip + cutoff / gate ramp, the knob put back
+        (k, dflt), knob, w = fx.STRIP_TOGGLE[name], ENTRY_KNOB[name], fx.bars_secs(2) + 1.5
+        a, c0 = st()[k], knob(); want = a if a > 0.001 else dflt         # in: the level it had (out remembers it) or the default
+        press(note); m = st()[k]; time.sleep(w); b, c1 = st()[k], knob()
+        press(note); time.sleep(w); s2, c2 = st()[k], knob()
+        first = (b == 0 and m > 0.001) if a > 0.001 else near(b, dflt)   # an out keeps the strip up while the ramp runs
+        check(f'{name} ramps strip {k + 1} over 2 bars, {ENTRY_KNOB[name].__name__} put back', first and abs(c1 - c0) <= 0.02 and near(s2, a) and abs(c2 - c0) <= 0.02,
+              f'strip {a} -> {m} (1 s) -> {b} -> {s2}, knob {round(c0, 3)} -> {round(c1, 3)} -> {round(c2, 3)}')
+        if a > 0.001: press(note); time.sleep(w)                          # reversal starts from out
+        c0 = knob(); press(note); time.sleep(0.2); press(note); time.sleep(w); s3, c3 = st()[k], knob()
+        check(f'{name} in, then out after ~1 s: reverses to out', s3 == 0 and abs(c3 - c0) <= 0.02, f'strip {s3}, knob {round(c0, 3)} -> {round(c3, 3)}')
+        if a > 0.001: press(note); time.sleep(w); check(f'{name} back in at its level', near(st()[k], a), f'{st()[k]} (was {a})')
+    k = fx.STRIP_TOGGLE['voice in/out'][0]; a = st()[k]; press(13); b = st()[k]; press(13)
+    check(f'voice in/out toggles strip {k + 1} at once', (a == 0) != (b == 0) and st()[k] == a, f'{a} -> {b} -> {st()[k]}')
     c0 = fx.acid_cutoff(); press(14); time.sleep(4); c1 = fx.acid_cutoff(); press(14)
     check('acid sweep opens then snaps back', c1 > c0 + 0.01 and abs(fx.acid_cutoff() - c0) < 0.002, f'{round(c0, 2)} -> {round(c1, 2)} -> {round(fx.acid_cutoff(), 2)}')
     p0 = S.current_drum_pattern(); press(15); p1 = S.current_drum_pattern(); time.sleep(fx.bars_secs(2) + 1)
@@ -112,6 +127,32 @@ try:
     bank(2); a = st()[4]; press(11); time.sleep(fx.bars_secs(fx.FADE_BARS) + 1); b = st()[4]; press(11); time.sleep(fx.bars_secs(fx.FADE_BARS) + 1)
     check('drums in/out fades tracked drums out and back', a > 0.5 and b == 0 and abs(st()[4] - a) < 0.01, f'{a} -> {b} -> {st()[4]}')
     bank(0)
+
+    # ---- Synths page (page 3): it acts on the song last shown, here TOOM (page 3 is reached through page 2)
+    page(1); page(2); names = [r['name'] for r in get()['launchpad']['rows']]
+    check('Synths page rows', get()['launchpad']['page'] == 2 and names == ['acid patterns', 'acid moves', 'fills (hold)', 'arp dir / oct', 'arp interval', 'auto change'], f'{names}')
+    AC, AR = (lambda i: prm(S.ACID, i)), (lambda i: prm(synths.ARP, i))
+    press(76); a = AC(28); press(75); b = AC(28)
+    check('tr +5 then tr 0 transpose the Acid', a == 5 and b == 0, f'{a} {b}')
+    pats = lambda: json.loads(S.call('vcvrack_get_module_state', {'id': S.ACID}))['data']['patterns']
+    slot = round(AC(24)); p0 = pats()[slot]; press(72); press(74); t0 = time.time()
+    while pats()[slot] == p0 and time.time() - t0 < 3: time.sleep(0.25)
+    check('mut x3 then keep stores the mutated pattern in the playing slot', pats()[slot] != p0, f'slot {slot} after {round(time.time() - t0, 1)} s')
+    press(52); d = synths.arp_dir(); press(51)
+    check('down / up set the arp direction', d == 1 and synths.arp_dir() == 0, f'{d} {synths.arp_dir()}')
+    press(56); check('oct 2 = Arp OCT 2', AR(16) == 2, f'{AR(16)}')
+    press(43); check('5th = Arp INT 4', AR(18) == 4, f'{AR(18)}')
+    press(61); a = (AC(34), AC(33), 0 in row('fills (hold)')['lit']); press(61); b = (AC(34), 0 in row('fills (hold)')['lit'])
+    check('acid roll: click holds the roll fill, click again lets go', a == (1.0, 0.0, True) and b == (0.0, False), f'{a} {b}')
+    press(64); a = (AR(21), AR(20)); press(64); b = AR(21)
+    check('arp x2: click holds roll 2, click again lets go', a == (1.0, 2.0) and b == 0.0, f'{a} {b}')
+    press(31); a = 0 in row('auto change')['lit']; press(31); b = 0 in row('auto change')['lit']
+    check('auto acid on (lit) / off', a and not b, f'{a} {b}')
+    press(82); check('acid patterns pad 2 = TOOM pattern 2', AC(24) == S.ACID_SONG[1][1] and 1 in row('acid patterns')['lit'], f'{AC(24)} want {S.ACID_SONG[1][1]}')
+    press(11); time.sleep(4); fa, fb = fx.deck_filters(S.A), fx.deck_filters(S.B); press(11)
+    check('sweep up on the Synths page moves TOOM (deck B) only', fb[0] > 0.2 and [round(x, 2) for x in fa] == fx.BASEF[S.A] and [round(x, 2) for x in fx.deck_filters(S.B)] == fx.BASEF[S.B],
+          f'A {[round(x, 2) for x in fa]} B {[round(x, 2) for x in fb]}')
+    page(0)
 
     # ---- drums
     l0 = prm(S.DRUMS, 5); r1 = post('/machine'); r2 = post('/machine')
@@ -132,11 +173,20 @@ try:
     post('/mode', {'mode': 'acid'}); time.sleep(3); a = get()['minilab']['faders'][0]['label']
     post('/mode', {'mode': 'mix'}); time.sleep(3); b = get()['minilab']['faders'][0]['label']
     check('MiniLab mode switch relabels', a == 'cutoff' and b == 'vocals vol', f'{a} / {b}')
+    post('/mode', {'mode': 'env'}); time.sleep(3); g = get()['minilab']; f = [x['label'] for x in g['faders']]
+    check('MiniLab Acid Env mode', g['mode'] == 'env' and g['title'] == 'Acid Env' and f == ['filter attack', 'filter decay', 'filter sustain', 'filter release'], f'{g["mode"]} {g["title"]} {f}')
+    post('/mode', {'mode': 'mix'}); time.sleep(3)
 finally:
     # ---- put the rig back
     try: bank(0); press(18)                                    # clean: pads.py lets go of any move the test left held
     except Exception as e: print('clean failed', e)
-    for d, s in saved.items(): S.call('vcvrack_set_module_state', {'id': d, 'state': s})
+    try:                                                       # Synths page: let go of a held fill, auto change off
+        page(2)
+        for name, keep in (('fills (hold)', ()), ('auto change', (2, 3))):   # auto change pads 3-4 = phrase length, lit by design
+            for i in row(name)['lit']:
+                if i not in keep: press(row(name)['base'] + i)
+    except Exception as e: print('Synths let go failed', e)
+    for d, s in list(saved.items()) + list(saved_vs.items()): S.call('vcvrack_set_module_state', {'id': d, 'state': s})
     for m, p in saved_p.items(): S.call('vcvrack_set_params', {'moduleId': m, 'params': [{'id': k, 'value': v} for k, v in p.items()]})
     fx.bpm(saved_bpm); time.sleep(1)
     post('/mode', {'mode': saved_mode}); bank(saved_bank); page(saved_page); time.sleep(6)
