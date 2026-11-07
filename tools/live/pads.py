@@ -192,11 +192,11 @@ def fx_act(name):
             threading.Thread(target=fx.dnb_on, args=(snap, alive), daemon=True).start()
     elif name == 'transition' and state['fx'] & {'drums only', 'dnb'}:   # their release puts back the strips they saved (HUSH / dnb snapshot),
         LOG.write(time.ctime() + f" transition ignored: {sorted(state['fx'] & {'drums only', 'dnb'})} held\n")   # which would undo strip 8
-    elif name == 'transition':                                    # hand over to the song on show over 8 bars; runs once, blinks while it runs
-        if name in state['fx']: return
+    elif name == 'transition':                                    # hand over to the song on show with the pair's move (fx.MOVES: blend or break
+        if name in state['fx']: return                            # & drop, from the clock's next beat); runs once, blinks while it runs
         state['tgen'] += 1; g = state['tgen']; state['fx'].add(name); to = SP()   # the song pressed for, whatever page is on show when it ends
         def run():
-            try: done = fx.transition(to, state['on'], lambda: state['tgen'] == g)
+            try: done = fx.transition(to, state['on'], lambda: state['tgen'] == g, song=PLAY)   # from the song playing
             except Exception: LOG.write(traceback.format_exc()); done = False
             if done: playing(to)                                  # handed over: the arp, acid set and MiniLab follow (a cut-off one changes nothing)
             state['fx'].discard(name); LOG.write(time.ctime() + f" transition to {sections.PAGES[to]['name']} {'done' if done else 'cut off'}\n"); paint()

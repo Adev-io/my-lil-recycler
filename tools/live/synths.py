@@ -15,7 +15,8 @@ def arp_data(**kv):                          # read-modify-write of the arp's mo
         S.call('vcvrack_set_module_state', {'id': ARP, 'state': st}); return st['data']
 def set_scale(page):                         # song page 0 Lowdown, 1 Time Out Of Mind, 2 Disco Ulysses; any other page keeps the scale playing
     if page not in S.SCALES: return None
-    m = mask_of(S.SCALES[page])
+    return set_mask(mask_of(S.SCALES[page]))
+def set_mask(m):                             # any key mask (fx break & drop: the notes two songs share while the key changes)
     with ARP_LOCK:
         d = json.loads(S.call('vcvrack_get_module_state', {'id': ARP}))['data']
         if d.get('locked') and d.get('lockedMask') == m: return m

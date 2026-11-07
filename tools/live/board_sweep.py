@@ -133,8 +133,8 @@ try:
                 back = diff(b, a, skip={(fx.CLOCK, 0)})
                 check(f'bank {bk + 1} dnb', ok1 and ok2 and on1 and t1 > b[fx.CLOCK][0] and not on2 and a[fx.CLOCK][0] == b[fx.CLOCK][0] and not back,
                       f'{b[fx.CLOCK][0]} -> {t1} -> {a[fx.CLOCK][0]} BPM' + (f' not back: {back}' if back else ''))
-            elif name == 'transition':                                           # Lowdown on show: TOOM (deck B) sweeps out, Lowdown in
-                ok1 = press(note); on1 = fxon(name); time.sleep(fx.TRANS_SECS + 2.5); a, on2 = snap(), fxon(name)
+            elif name == 'transition':                                           # Lowdown on show: the pair's move (fx.MOVES), the longest waited out
+                ok1 = press(note); on1 = fxon(name); time.sleep(fx.bars_secs(max(b for _, b in fx.MOVES.values())) + 3); a, on2 = snap(), fxon(name)
                 check(f'bank {bk + 1} transition', ok1 and on1 and not on2 and logged(n0, 'transition to Lowdown done') and a[S.MIX][2] == U and a[S.MIX][3] == U
                       and a[S.MIX][7] == 0.0 and all(a[S.B][14 + k] == 0.0 and a[S.D][14 + k] == 0.0 for k in range(4))   # Disco (deck D) out too, strip 8 at rest 0
                       and [round(a[S.A][24 + k], 2) for k in range(4)] == fx.BASEF[S.A], f'lit {on1}->{on2}')

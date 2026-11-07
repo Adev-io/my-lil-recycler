@@ -403,37 +403,50 @@ assert fx.song_decks(2, [{}, {}, {21: 0}, {}]) == [S.D, fx.C] and fx.song_decks(
 HU = next(n for n in ast.parse(src_p).body if isinstance(n, ast.Assign) and getattr(n.targets[0], 'id', None) == 'HUSH')
 assert ast.literal_eval(HU.value) == {'drums only': (1, 2, 3, 5, 6, 7), 'no drums': (0, 4)}, ast.dump(HU.value)   # drums only silences deck D too
 sP = synths.pads(2); assert [sP[81 + i][2] for i in range(4)] == [25, 12, 2, 22] and 85 not in sP   # Synths acid row on Disco
-class Rig:                                                                    # decks / Mixer as params + slot paths; S.call answers from it
-    def __init__(s): s.p = {m: {i: 0.0 for i in range(48)} for m in (S.A, S.B, fx.C, S.D, S.MIX)}; s.path = {m: [''] * 4 for m in s.p}; s.sets = []
+class Clock:                                                                  # fake time for fx (sleeps advance it); the set clock beats on it
+    def __init__(s, t=1000.0, bpm=128.0): s.t, s.beat = t, 60.0 / bpm
+    def time(s): return s.t
+    def sleep(s, d): s.t += max(d, 1e-6)
+    def gate(s): return 10.0 if s.t % s.beat < s.beat / 2 else 0.0               # Clocked master out: high for the first half of each beat
+class Rig:                                                                    # decks / Mixer as params + slot paths, the clock, the arp's data; S.call answers from it
+    def __init__(s):
+        s.p = {m: {i: 0.0 for i in range(48)} for m in (S.A, S.B, fx.C, S.D, S.MIX)}; s.path = {m: [''] * 4 for m in s.p}; s.sets = []
+        s.clk, s.arp, s.log, s.fail = Clock(), {'locked': True, 'lockedMask': 2774}, [], None; s.p[fx.CLOCK] = {0: 128.0}   # log: (time, module, writes)
     def __call__(s, name, a=None):
+        if name == 'vcvrack_get_voltages': return json.dumps([{'id': fx.CLOCK, 'outputs': [{'id': 0, 'voltages': [s.clk.gate()]}]}])
         if name == 'vcvrack_get_params': return json.dumps([{'id': i, 'value': v} for i, v in s.p[a['moduleId']].items()])
         if name == 'vcvrack_set_params':
-            s.sets.append(a)
+            if s.fail and s.fail(a): s.fail = None; raise RuntimeError('rig write failed')   # one-shot failure
+            s.sets.append(a); s.log.append((s.clk.t, a['moduleId'], {x['id']: x['value'] for x in a['params']}))
             for x in a['params']: s.p[a['moduleId']][x['id']] = x['value']
             return '[]'
-        if name == 'vcvrack_get_module_state': return json.dumps({'params': [{'id': i, 'value': v} for i, v in s.p[a['id']].items()], 'data': {'slots': [{'path': x} for x in s.path[a['id']]]}})
-        if name == 'vcvrack_set_module_state': s.path[a['id']] = [x['path'] for x in a['state']['data']['slots']]; return '{}'
+        if name == 'vcvrack_get_module_state':
+            if a['id'] == synths.ARP: return json.dumps({'id': synths.ARP, 'data': dict(s.arp)})
+            return json.dumps({'params': [{'id': i, 'value': v} for i, v in s.p[a['id']].items()], 'data': {'slots': [{'path': x} for x in s.path[a['id']]]}})
+        if name == 'vcvrack_set_module_state':
+            if a['id'] == synths.ARP: s.arp.update(a['state']['data']); s.log.append((s.clk.t, synths.ARP, dict(a['state']['data']))); return '{}'
+            s.path[a['id']] = [x['path'] for x in a['state']['data']['slots']]; s.log.append((s.clk.t, a['id'], {'paths': list(s.path[a['id']])})); return '{}'
         raise AssertionError(name)
-real_t = dict(call=S.call, TRANS_SECS=fx.TRANS_SECS, STEP=fx.STEP)
+real_t = dict(call=S.call, time=fx.time)
 try:
     rig = Rig(); S.call = rig; rig.p[S.D].update({14: 0.8, 15: 0.8}); rig.p[S.MIX].update({2: U, 3: U, 4: U, 7: 0.0})
     S.base(); assert all(rig.p[S.D][14 + k] == 0.0 for k in range(4)) and rig.p[S.MIX][7] == 0.0, rig.p[S.D]   # strip 7 closed: Disco slots silenced
     assert all(x['id'] in (0, 1, 2, 3, 40, 41, 42, 43) for a in rig.sets if a['moduleId'] == S.MIX for x in a['params']), 'base never writes strip 7'
     rig.p[S.MIX][7] = U; rig.p[S.D][15] = 1.0; S.base(); assert rig.p[S.D][15] == 1.0, 'Disco open: base leaves its rows playing'
-    rig = Rig(); S.call = rig; fx.TRANS_SECS, fx.STEP = 0.05, 0.005
+    rig = Rig(); S.call = rig; fx.time = rig.clk
     K = S.ROWS[71]; rig.path[S.A][1] = K['samples'][0]; rig.p[S.A][15] = K['level']; rig.p[S.MIX].update({2: U, 3: U, 4: U, 7: 0.0})   # Lowdown keys playing
     rig.p[S.A].update({24 + k: v for k, v in enumerate(fx.BASEF[S.A])}); on = [{71: 0}, {}, {}, {}]
-    assert fx.transition(2, on, lambda: True) is True                         # to Disco: silent, so pad 1 of piano, bass, drums comes in
+    assert fx.transition(2, on, lambda: True, song=0) is True                 # Lowdown -> Disco (break & drop): silent, so pad 1 of piano, bass, drums comes in
     assert rig.path[S.D][1] == RD[71]['samples'][0] and rig.path[S.D][0] == RD[41]['samples'][0] and rig.path[fx.C][0] == RD[21]['samples'][0], rig.path
     assert (rig.p[S.D][15], rig.p[S.D][14], rig.p[fx.C][14]) == (1.0, 1.0, 1.0) and rig.p[S.MIX][7] == U and on[2] == {71: 0, 41: 0, 21: 0}, (rig.p[S.MIX][7], on)
     assert all(rig.p[S.A][14 + k] == 0.0 for k in range(4)) and on[0][71] is None and rig.p[S.MIX][2] == U and rig.p[S.MIX][3] == U, 'Lowdown out, its strip ready at unity'
     assert [rig.p[S.A][24 + k] for k in range(4)] == fx.BASEF[S.A] and rig.p[S.MIX][4] == U, 'filters back at rest; drums strip kept'
-    assert fx.transition(0, on, lambda: True) is True                         # back to Lowdown: Disco out, its strip rests at 0 again
+    assert fx.transition(0, on, lambda: True, song=2) is True                 # back to Lowdown (break & drop): Disco out, its strip rests at 0 again
     assert all(rig.p[S.D][14 + k] == 0.0 for k in range(4)) and rig.p[S.MIX][7] == 0.0 and rig.p[S.MIX][2] == U, (rig.p[S.D], rig.p[S.MIX][7])
     assert on[2][71] is None and on[2][41] is None and [on[0][b] for b in fx.FIRST] == [0, 0, 0] and rig.path[fx.C][0] == S.ROWS[21]['samples'][0], on
     rig.sets.clear(); fx.clean(); assert rig.p[S.MIX][7] == 0.0 and not any(x['id'] == 7 for a in rig.sets if a['moduleId'] == S.MIX for x in a['params'])
     assert any(a['moduleId'] == S.D and {x['id'] for x in a['params']} == {36, 37, 38, 39} for a in rig.sets), 'clean un-reverses deck D'
-finally: S.call, fx.TRANS_SECS, fx.STEP = real_t['call'], real_t['TRANS_SECS'], real_t['STEP']
+finally: S.call, fx.time = real_t['call'], real_t['time']
 print('Disco offline: page 3 rows on deck D (+ shared drums slot), files in disco-crate pinned bars 8 key B major, labels unique, mix map = deck D, own deck / strip 7 /'
       ' rest 0, drums only hushes strip 7, Synths acid row [25, 12, 2, 22], scale 3418, base silences Disco slots when strip 7 is closed and never opens it,'
       ' transition in (pad 1 rows, strip 7 to unity, Lowdown out) and out (strip 7 back to 0), clean leaves strip 7, un-reverses deck D')
@@ -452,7 +465,7 @@ def fake_arp2(name, a=None):                                                    
     if name == 'vcvrack_set_module_state': arp.update(a['state']['data']); return '{}'
     return json.dumps({'id': synths.ARP, 'data': dict(arp)})
 st3 = dict(page=0, song=0, busy=False, fx=set(), tgen=0, on=[{} for _ in S.PAGES], slit=set())
-fx3 = types.SimpleNamespace(transition=lambda pg, on, alive: trans.append(pg) or True)
+fx3 = types.SimpleNamespace(transition=lambda pg, on, alive, song=None: trans.append(pg) or True)
 Q3 = dict(state=st3, sections=S, fx=fx3, synths=types.SimpleNamespace(follow=synths.follow, lit=lambda st: set()), os=os, here=tmpp, time=__import__('time'),
           threading=types.SimpleNamespace(Thread=SyncThread), traceback=__import__('traceback'), paint=lambda: None, LOG=types.SimpleNamespace(write=lambda s: None))
 exec(compile(ast.Module(body=keep3, type_ignores=[]), 'pads.py', 'exec'), Q3)
@@ -465,7 +478,7 @@ try:
     Q3['turn'](-1); assert Q3['SP']() == 2; Q3['fx_act']('transition')           # Disco page: transition to Disco
     assert trans == [2] and st3['song'] == 2 and arp['lockedMask'] == 3418 and maps.mix_map()[83][:2] == (S.D, 15), (trans, st3['song'], arp)
     Q3['turn'](-1); Q3['turn'](-1); assert st3['page'] == 0 and st3['song'] == 2 and arp['lockedMask'] == 3418   # back on the Lowdown page: Disco still playing
-    fx3.transition = lambda pg, on, alive: trans.append(pg) and False; Q3['fx_act']('transition')   # cut off (clean): the song playing stays
+    fx3.transition = lambda pg, on, alive, song=None: trans.append(pg) and False; Q3['fx_act']('transition')   # cut off (clean): the song playing stays
     assert trans == [2, 0] and st3['song'] == 2 and arp['lockedMask'] == 3418 and maps.page_now() == 2
     for held in ('drums only', 'dnb'):                                          # their release restores saved strips (strip 8 too): transition ignored
         st3['fx'] = {held}; Q3['fx_act']('transition'); assert trans == [2, 0] and st3['fx'] == {held}, (held, trans, st3['fx'])
@@ -481,19 +494,103 @@ try:
     assert not [l for l in logs if 'Traceback' in l], logs
 finally: S.play, fx.strips = real_play, real_strips
 try:                                                                            # transition: an out deck already at strip 0 (a Disco cue) is left alone
-    rig = Rig(); S.call = rig; fx.TRANS_SECS, fx.STEP = 0.05, 0.005
+    rig = Rig(); S.call = rig; fx.time = rig.clk
     rig.path[S.A][1] = K['samples'][0]; rig.p[S.A][15] = K['level']; rig.p[S.MIX].update({2: U, 3: U, 4: U, 7: 0.0})   # Lowdown keys heard
     rig.path[S.D][1] = RD[71]['samples'][0]; rig.p[S.D][15] = 1.0; on = [{71: 0}, {}, {71: 0}, {}]                  # Disco piano cued at strip 0
-    rig.sets.clear(); assert fx.transition(1, on, lambda: True) is True                                             # Lowdown -> TOOM
+    rig.sets.clear(); assert fx.transition(1, on, lambda: True, song=0) is True                                            # Lowdown -> TOOM
     assert rig.p[S.D][15] == 1.0 and on[2] == {71: 0} and rig.p[S.MIX][7] == 0.0 and all(rig.p[S.A][14 + k] == 0.0 for k in range(4)), (rig.p[S.D][15], on)
     assert not any(a['moduleId'] == S.D for a in rig.sets) and not any(x['id'] == 7 for a in rig.sets if a['moduleId'] == S.MIX for x in a['params']), 'deck D untouched'
     rig.p[S.MIX][7] = 0.4; fx.clean(0); assert rig.p[S.MIX][7] == 0.0 and [rig.p[S.MIX][k] for k in (2, 3, 4)] == [U, U, U]   # clean, Lowdown playing:
     rig.p[S.MIX][7] = 0.4; fx.clean(2); assert rig.p[S.MIX][7] == U                                               # a half-faded strip 8 back to 0; Disco playing: open
     rig.p[S.MIX][7] = 0.4; fx.clean(); assert rig.p[S.MIX][7] == 0.4                                              # no song given: left as is
-finally: S.call, fx.TRANS_SECS, fx.STEP = real_t['call'], real_t['TRANS_SECS'], real_t['STEP']
+finally: S.call, fx.time = real_t['call'], real_t['time']
 print('Reviewer fixes offline: transition ignored while drums only / dnb held; transition leaves an out deck at strip 0 (Disco cue: slots, lit pads, strip 8);'
       ' clean settles strip 8: 0 unless Disco is the song playing, then unity')
 print('Song playing offline: heard / playing (loudest, tie -> page on show, cued Disco at strip 0 not heard), Lowdown playing -> pages TOOM, Disco, Synths:'
       ' scale 2774, Lowdown acid set, mix map deck A; transition to Disco -> 3418, deck D, page.txt 2; page turns back keep it; cut-off transition keeps it;'
       ' first song pad with no other song heard sets it, a cue over a heard song does not')
+# ---- song-to-song moves (fx.MOVES): pair -> move, bar timing on the set clock, STUT, arp scale, cut-off, end state (rig, clock + time stubbed)
+pairs = {(a, b): fx.move_for(a, b) for a in range(3) for b in range(3) if a != b}
+assert pairs == {(0, 1): ('blend', 16), (1, 0): ('blend', 16), (0, 2): ('break_drop', 4), (2, 0): ('break_drop', 4), (1, 2): ('break_drop', 4),
+                 (2, 1): ('break_drop', 4)}, pairs
+mv0 = dict(fx.MOVES); fx.MOVES.clear()                                          # unlisted pairs go by key
+try: assert fx.move_for(0, 1) == ('blend', 16) and fx.move_for(2, 1) == ('break_drop', 4) and fx.move_for(2, 2) == ('blend', 16)
+finally: fx.MOVES.update(mv0)
+SHARED = synths.mask_of(set(S.SCALES[0]) & set(S.SCALES[2])); assert SHARED == 2130, SHARED   # D major & B major share C# E F# B
+BEAT = 60.0 / 128; BAR = 4 * BEAT; STUTS = set(range(fx.STUT, fx.STUT + 4))
+assert abs(16 * BAR - 30.0) < 1e-9 and abs(4 * BAR - 7.5) < 1e-9                # at 128: blend 30 s, break 7.5 s to the drop
+def song_on(rig, page, on):                                                     # a song heard: pad 1 of its FIRST rows at row level, its strip open
+    for b in fx.FIRST:
+        r = S.PAGES[page]['rows'][b]; d = r.get('deck', S.A); rig.path[d][r['slot']] = r['samples'][0]; rig.p[d][14 + r['slot']] = r['level']; on[page][b] = 0
+    rig.p[S.MIX][fx.STRIP[fx.own_deck(page)]] = U
+def fresh(page):
+    rig = Rig(); S.call = rig; fx.time = rig.clk; rig.p[S.MIX].update({2: U, 3: U, 4: U, 7: 0.0}); on = [{}, {}, {}, {}]
+    for d in (S.A, S.B, fx.C, S.D): rig.p[d].update({24 + k: v for k, v in enumerate(fx.BASEF[d])})
+    song_on(rig, page, on); rig.arp['lockedMask'] = synths.mask_of(S.SCALES[page])
+    return rig, on, (int(rig.clk.t / BEAT) + 1) * BEAT                         # the clock's next beat after the press
+def val(rig, T, m, i, v=0.0):                                                   # what (module, param) held at time T, from the write log
+    for t, mm, w in rig.log:
+        if t <= T + 1e-9 and mm == m and i in w: v = w[i]
+    return v
+def writes(rig, m, i): return [(t, w[i]) for t, mm, w in rig.log if mm == m and i in w]
+def rows_in(rig, page):                                                         # the song's FIRST rows: pad 1 paths at row levels
+    return all(rig.path[r.get('deck', S.A)][r['slot']] == r['samples'][0] and rig.p[r.get('deck', S.A)][14 + r['slot']] == r['level']
+               for b, r in S.PAGES[page]['rows'].items() if b in fx.FIRST)
+try:
+    for (a, b), (name, bars) in sorted(pairs.items()):                         # every ordered pair: its move, the same end state
+        rig, on, edge = fresh(a); da, db = fx.own_deck(a), fx.own_deck(b)
+        assert fx.transition(b, on, lambda: True, song=lambda: a) is True, (a, b)
+        stl = writes(rig, da, fx.STUTLEN)
+        assert bool(stl) == (name == 'break_drop') and abs(rig.log[-1][0] - (edge + bars * BAR)) <= fx.POLL, (a, b, stl, rig.log[-1][0] - edge)
+        assert all(rig.p[da][14 + k] == 0.0 and rig.p[da][24 + k] == fx.BASEF[da][k] and rig.p[da][fx.STUT + k] == 0.0 for k in range(4)), (a, b, rig.p[da])
+        assert rig.p[S.MIX][fx.STRIP[da]] == fx.REST.get(da, U) and rig.p[S.MIX][fx.STRIP[db]] == U and rig.p[S.MIX][4] == U and rows_in(rig, b), (a, b)
+        assert all(on[a][r] is None for r in (71, 41)) and all(on[b][r] == 0 for r in fx.FIRST), (a, b, on)
+        assert rig.p[fx.C][fx.STUT] == 0.0 and (name == 'blend' or rig.arp['lockedMask'] == synths.mask_of(S.SCALES[b])), (a, b, rig.arp)
+    # blend Lowdown -> TOOM: drums + bass rise under Lowdown (bars 1-8), Lowdown high-passes away while keys + vocals come in (bars 9-16)
+    rig, on, edge = fresh(0); H = 8 * BAR
+    assert fx.transition(1, on, lambda: True, song=lambda: 0) is True
+    t1 = rig.log[0][0]; assert edge <= t1 <= edge + fx.POLL, ('blend starts on the beat', t1 - edge)
+    assert all(t >= edge + H - 1e-9 for t, m, w in rig.log if m == S.A or (m == S.MIX and 2 in w)), 'Lowdown untouched in bars 1-8'
+    assert 0.3 < val(rig, edge + 4 * BAR, S.B, 14) < 0.7 and val(rig, edge + H, S.B, 14) > 0.99, 'TOOM bass rises over bars 1-8'
+    assert val(rig, edge + H - fx.STEP, S.B, 15) == 0.0 and val(rig, edge + H - fx.STEP, S.B, 17) == 0.0, 'TOOM keys + vocals wait for bar 9'
+    assert 0.3 < val(rig, edge + 12 * BAR, S.B, 15) < 0.7 and 0.3 < val(rig, edge + 12 * BAR, S.B, 17) < 0.7, 'keys + vocals rise over bars 9-16'
+    assert 0.2 < val(rig, edge + 12 * BAR, S.A, 24) < 0.65 and 0.2 < val(rig, edge + 12 * BAR, S.MIX, 2) < 0.5, 'Lowdown high-pass sweep + fade in bars 9-16'
+    assert all(v == 1.0 for t, v in writes(rig, fx.C, 14)) and rig.path[fx.C][0] == S.ROWS_TOOM[21]['samples'][0], 'shared drums slot keeps sounding, TOOM drums in'
+    assert not any(m == synths.ARP for t, m, w in rig.log) and not writes(rig, S.A, fx.STUTLEN), 'blend: no STUT, no scale write (same key)'
+    assert [rig.p[S.B][14 + k] for k in range(4)] == [1.0, 1.0, 0.0, 1.0] and on[1] == {41: 0, 21: 0, 71: 0, 81: 0}, (rig.p[S.B], on[1])
+    # break & drop TOOM -> Disco: STUT 1/4, 1/4, 1/8, 1/16 per bar as TOOM's filters close, air on beat 4 of bar 4, Disco full on at bar 5
+    rig, on, edge = fresh(1); t_air, t_drop = edge + 3 * BAR + 3 * BEAT, edge + 4 * BAR
+    assert fx.transition(2, on, lambda: True, song=lambda: 1) is True
+    fb = next(x for x in rig.log if x[1] == S.B)                                # (deck A's open strip makes it an out deck too, as before: STUT on silence)
+    assert edge <= rig.log[0][0] <= edge + fx.POLL and rig.log[0][2].get(fx.STUT) == 1.0 and fb[0] == rig.log[0][0] and fb[2].get(fx.STUT) == 1.0, ('STUT first, on the beat', fb)
+    for d, n in ((S.B, 4), (fx.C, 1)):                                          # TOOM's deck + the shared drums slot it was playing
+        sl = writes(rig, d, fx.STUTLEN); assert [v for t, v in sl] == [0.0, 0.0, 1.0, 2.0], (d, sl)
+        assert all(abs(t - (edge + k * BAR)) <= fx.POLL for k, (t, v) in enumerate(sl)), (d, [t - edge for t, v in sl])
+        for k in range(n):
+            h = writes(rig, d, fx.STUT + k); assert [v for t, v in h] == [1.0] * 4 + [0.0] and abs(h[-1][0] - t_air) <= fx.POLL, (d, k, h)
+    assert val(rig, t_air - 1e-6, S.B, 24) < -0.8 and val(rig, t_air - 1e-6, S.MIX, 3, U) == U, 'filters closed, TOOM strip still open until the air'
+    assert val(rig, t_air, S.MIX, 3) == 0.0 and val(rig, t_air, S.MIX, 7) == 0.0 and val(rig, t_air, S.MIX, 4) == 0.0, 'air: strips at 0'
+    assert val(rig, t_drop - 1e-6, S.D, 15) == 0.0 and val(rig, t_drop, S.D, 15) == 1.0 and val(rig, t_drop, S.MIX, 7) == U, 'Disco full on at the drop'
+    ar = [(t, w['lockedMask']) for t, m, w in rig.log if m == synths.ARP]
+    assert [v for t, v in ar] == [SHARED, 3418] and abs(ar[0][0] - edge) <= fx.POLL and abs(ar[1][0] - t_drop) <= fx.POLL, ('shared keys, then B major', ar)
+    assert rig.p[S.MIX][3] == U and all(rig.p[S.B][14 + k] == 0.0 for k in range(4)) and rows_in(rig, 2) and rig.p[S.MIX][4] == U, 'end state'
+    # cut off mid-break (clean): only STUT let go + the playing song's keys back after it, nothing else
+    rig, on, edge = fresh(1); T = edge + 2.5 * BAR
+    assert fx.transition(2, on, lambda: rig.clk.t < T, song=lambda: 1) is False
+    after = [(m, w) for t, m, w in rig.log if t >= T]
+    assert after and all((m in (S.A, S.B, fx.C) and set(w) <= STUTS and set(w.values()) == {0.0}) or (m == synths.ARP and w['lockedMask'] == 2774) for m, w in after), after
+    assert any(m == synths.ARP for m, w in after) and rig.arp['lockedMask'] == 2774 and all(rig.p[S.B][fx.STUT + k] == 0.0 for k in range(4)) and rig.p[fx.C][fx.STUT] == 0.0
+    # cut off before the first beat: nothing written at all; cut off mid-blend: nothing after
+    rig, on, edge = fresh(1); assert fx.transition(2, on, lambda: rig.clk.t < edge - 0.01, song=1) is False and rig.log == [], rig.log
+    rig, on, edge = fresh(0); T = edge + 10 * BAR
+    assert fx.transition(1, on, lambda: rig.clk.t < T, song=0) is False and rig.log and all(t < T for t, m, w in rig.log), 'blend cut-off writes nothing after'
+    # a rig write failing mid-break (bar 3 STUT): the error goes up, STUT still let go and the keys put back
+    rig, on, edge = fresh(1); rig.fail = lambda a: a['moduleId'] == S.B and any(x['id'] == fx.STUTLEN and x['value'] == 1.0 for x in a['params'])
+    try: fx.transition(2, on, lambda: True, song=1); raise AssertionError('no error')
+    except RuntimeError: pass
+    assert all(rig.p[S.B][fx.STUT + k] == 0.0 for k in range(4)) and rig.p[fx.C][fx.STUT] == 0.0 and rig.arp['lockedMask'] == 2774, (rig.p[S.B], rig.arp)
+finally: S.call, fx.time = real_t['call'], real_t['time']
+print('Song moves offline: 6 ordered pairs -> blend (Lowdown/TOOM) or break & drop (any Disco pair), unlisted by key; bar 1 on the clock beat;'
+      ' blend 16 bars (bass + drums rise 1-8, keys + vocals + HP sweep 9-16), break 4 bars (STUT 1/4 1/4 1/8 1/16 per bar, air on beat 4, drop at bar 5),'
+      ' arp 2130 then target; cut-off / error: STUT let go + keys back, nothing else; end state as before')
 print('ok')
