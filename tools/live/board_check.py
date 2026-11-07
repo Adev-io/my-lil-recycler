@@ -230,7 +230,7 @@ class SyncThread:                                                               
     def __init__(s, target, args=(), daemon=None): s.t, s.a = target, args
     def start(s): s.t(*s.a)
 done = []; bank_ = [fx.FX3]
-P = dict(state={'busy': True, 'vox': {}, 'down': set(), 'held': set()}, fx=fx, MOVES=lambda: bank_[0], SYN=lambda: False, SP=lambda: 0, pad=lambda n: None,
+P = dict(state={'busy': True, 'vox': {}, 'down': set(), 'held': set()}, fx=fx, MOVES=lambda: bank_[0], SYN=lambda: False, SP=lambda: 0, PLAY=lambda: 0, pad=lambda n: None,
          led=lambda *a, **k: None, paint=lambda: None, LOG=types.SimpleNamespace(write=lambda s: None), HOLDL=threading.RLock(), CLEANL=threading.Lock(),
          threading=types.SimpleNamespace(Thread=SyncThread), traceback=__import__('traceback'), time=__import__('time'),
          fx_act=lambda name: done.append(('fx_act', name)), act=lambda note, hw=False: done.append(('act', note)), let_go=lambda n: None)
@@ -261,7 +261,7 @@ keep = [n for n in ast.parse(src_p).body if (isinstance(n, ast.FunctionDef) and 
         or (isinstance(n, ast.Assign) and any(getattr(t, 'id', None) in ('ROW_CC', 'L', 'RP') for t in n.targets))]
 assert len(keep) == 6, [getattr(n, 'name', None) for n in keep]
 played, logs, real_play = [], [], S.play
-st2 = {'page': 0, 'busy': False, 'acts': 0, 'rowpage': {}, 'on': [{} for _ in S.PAGES], 'path': [{} for _ in S.PAGES]}
+st2 = {'page': 0, 'song': 0, 'busy': False, 'acts': 0, 'rowpage': {},'on': [{} for _ in S.PAGES], 'path': [{} for _ in S.PAGES]}
 Q2 = dict(state=st2, sections=S, fx=fx, os=os, time=__import__('time'), traceback=__import__('traceback'), importlib=types.SimpleNamespace(reload=lambda m: m),
           MOVES=lambda: {}, SYN=lambda: bool(S.PAGES[st2['page']].get('synth')), R=lambda: S.PAGES[st2['page']]['rows'], ON=lambda: st2['on'][st2['page']],
           paint=lambda: None, LOG=types.SimpleNamespace(write=logs.append))
@@ -437,4 +437,47 @@ finally: S.call, fx.TRANS_SECS, fx.STEP = real_t['call'], real_t['TRANS_SECS'], 
 print('Disco offline: page 3 rows on deck D (+ shared drums slot), files in disco-crate pinned bars 8 key B major, labels unique, mix map = deck D, own deck / strip 7 /'
       ' rest 0, drums only hushes strip 7, Synths acid row [25, 12, 2, 22], scale 3418, base silences Disco slots when strip 7 is closed and never opens it,'
       ' transition in (pad 1 rows, strip 7 to unity, Lowdown out) and out (strip 7 back to 0), clean leaves strip 7, un-reverses deck D')
+# ---- the song playing (pads.py PLAY / playing()): the arp's keys, the acid set and the MiniLab mix map follow it, never a page turn
+mx = [0.0] * 8; mx[2] = mx[3] = U; lowk = S.ROWS[71]['samples'][0]                # strips: decks A, B open, deck D (7) resting at 0
+pth = lambda **kw: [kw.get('p0', {}), kw.get('p1', {}), kw.get('p2', {}), {}]
+assert fx.heard(mx, pth(p0={71: lowk})) == {0: U} and fx.playing(mx, pth(p0={71: lowk}), 2) == 0   # Lowdown heard, Disco page on show: Lowdown
+assert fx.heard(mx, pth(p2={71: 'x'})) == {} and fx.playing(mx, pth(p2={71: 'x'}), 2) == 2 and fx.playing(mx, pth(), 3) == 0   # Disco cued at strip 0: not
+assert fx.heard(mx, pth(p0={21: 'drums'})) == {}                                  # heard; none -> the song page on show, Synths page -> 0; drums row alone: no song
+m3 = list(mx); m3[3] = 0.5; assert fx.playing(m3, pth(p0={71: 'a'}, p1={71: 'b'}), 1) == 0 and fx.playing(mx, pth(p0={71: 'a'}, p1={71: 'b'}), 1) == 1   # loudest; tie -> page on show
+keep3 = [n for n in ast.parse(src_p).body if (isinstance(n, ast.FunctionDef) and n.name in ('turn', 'playing', 'fx_act'))
+         or (isinstance(n, ast.Assign) and any(getattr(t, 'id', None) in ('PLAY', 'SP', 'SYN', 'HUSH') for t in n.targets))]
+assert len(keep3) == 7, [getattr(n, 'name', None) for n in keep3]
+tmpp, arp, trans = tempfile.mkdtemp(), {'locked': True, 'lockedMask': 2774}, []
+def fake_arp2(name, a=None):                                                     # the arp's module data, written back by set_module_state
+    if name == 'vcvrack_set_module_state': arp.update(a['state']['data']); return '{}'
+    return json.dumps({'id': synths.ARP, 'data': dict(arp)})
+st3 = dict(page=0, song=0, busy=False, fx=set(), tgen=0, on=[{} for _ in S.PAGES], slit=set())
+fx3 = types.SimpleNamespace(transition=lambda pg, on, alive: trans.append(pg) or True)
+Q3 = dict(state=st3, sections=S, fx=fx3, synths=types.SimpleNamespace(follow=synths.follow, lit=lambda st: set()), os=os, here=tmpp, time=__import__('time'),
+          threading=types.SimpleNamespace(Thread=SyncThread), traceback=__import__('traceback'), paint=lambda: None, LOG=types.SimpleNamespace(write=lambda s: None))
+exec(compile(ast.Module(body=keep3, type_ignores=[]), 'pads.py', 'exec'), Q3)
+real_pagef, real_call3 = maps.PAGEF, synths.S.call; maps.PAGEF = os.path.join(tmpp, 'page.txt')
+try:
+    synths.S.call = fake_arp2; Q3['playing'](0)                                 # Lowdown playing
+    for p in (1, 2, 3): assert Q3['turn'](1) and st3['page'] == p                # turn to TOOM, Disco, then Synths
+    assert st3['song'] == 0 and arp['lockedMask'] == 2774 and Q3['SP']() == 0, (st3['song'], arp)   # scale stays D major; Synths moves act on Lowdown
+    assert [synths.pads(st3['song'])[81 + i][2] for i in range(3)] == S.ACID_SONG[0] and maps.mix_map()[83][:2] == (S.A, 15), maps.mix_map()[83]   # Lowdown's acid set, MiniLab on deck A
+    Q3['turn'](-1); assert Q3['SP']() == 2; Q3['fx_act']('transition')           # Disco page: transition to Disco
+    assert trans == [2] and st3['song'] == 2 and arp['lockedMask'] == 3418 and maps.mix_map()[83][:2] == (S.D, 15), (trans, st3['song'], arp)
+    Q3['turn'](-1); Q3['turn'](-1); assert st3['page'] == 0 and st3['song'] == 2 and arp['lockedMask'] == 3418   # back on the Lowdown page: Disco still playing
+    fx3.transition = lambda pg, on, alive: trans.append(pg) and False; Q3['fx_act']('transition')   # cut off (clean): the song playing stays
+    assert trans == [2, 0] and st3['song'] == 2 and arp['lockedMask'] == 3418 and maps.page_now() == 2
+finally: maps.PAGEF, synths.S.call = real_pagef, real_call3; shutil.rmtree(tmpp, ignore_errors=True)
+Q2['playing'] = lambda p: st2.__setitem__('song', p); real_strips = fx.strips    # a song pad pressed while no other song is heard: that song plays
+try:
+    S.play = lambda *a, **k: None; fx.strips = lambda: list(mx); logs.clear()
+    st2.update(page=1, song=0, busy=False, rowpage={}, on=[{} for _ in S.PAGES], path=[{71: lowk}, {}, {}, {}])
+    Q2['act'](71); assert st2['song'] == 0 and st2['on'][1][71] == 0             # Lowdown still heard: a TOOM pad cues, Lowdown stays playing
+    st2['path'][0][71] = None; Q2['act'](72); assert st2['song'] == 1             # nothing else heard: TOOM is the song playing
+    st2['page'] = 2; Q2['act'](71); assert st2['song'] == 1                      # TOOM heard: a Disco cue changes nothing
+    assert not [l for l in logs if 'Traceback' in l], logs
+finally: S.play, fx.strips = real_play, real_strips
+print('Song playing offline: heard / playing (loudest, tie -> page on show, cued Disco at strip 0 not heard), Lowdown playing -> pages TOOM, Disco, Synths:'
+      ' scale 2774, Lowdown acid set, mix map deck A; transition to Disco -> 3418, deck D, page.txt 2; page turns back keep it; cut-off transition keeps it;'
+      ' first song pad with no other song heard sets it, a cue over a heard song does not')
 print('ok')

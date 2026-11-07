@@ -150,9 +150,10 @@ try:
                 p2, on2 = round(prm(S.DRUMS, 3)) + 1, fxon(name)
                 check(f'bank {bk + 1} break fill', ok1 and p1 == fx.BREAK and on1 and p2 == round(b[S.DRUMS][3]) + 1 and not on2 and logged(n0, 'fx break fill'),
                       f'pattern {round(b[S.DRUMS][3]) + 1} -> {p1} -> {p2}')
-            elif name in fx.VOX_STUT:                                            # vox stutter (Recycler 2.4.0): a click holds the song on show's
-                VS = fx.STUT + fx.VOX_SLOT                                       # vocals at its length, a second click lets go; Lowdown, then TOOM
-                for pg, d, o in ((0, S.A, S.B), (1, S.B, S.A), (2, S.D, S.A)):     # Disco: slot 3 = horns/synth (no vocals)
+            elif name in fx.VOX_STUT:                                            # vox stutter (Recycler 2.4.0): a click holds the song playing's
+                VS = fx.STUT + fx.VOX_SLOT                                       # vocals at its length, a second click lets go; from every page
+                song = get()['launchpad']['song']; d = fx.own_deck(song); o = S.B if d != S.B else S.A
+                for pg in range(len(L0['pages'])):
                     if len(b[d]) <= fx.STUTLEN: print(f'SKIP  bank {bk + 1} {name} page {pg + 1}  deck has {len(b[d])} params (Recycler before 2.4.0)', flush=True); continue
                     page(pg); ok1 = press(note); h = (prm(d, VS), prm(d, fx.STUTLEN), prm(o, VS), fxon(name))
                     ok2 = press(note); a = (prm(d, VS), fxon(name))
@@ -167,9 +168,9 @@ try:
     r2 = post('/machine'); b = (prm(S.DRUMS, 5), get()['launchpad']['machine'])
     check('drum machine button (top-row Session) off / on', r1['on'] is False and a == (0.0, False) and r2['on'] is True and near(b[0], l0) and b[1] is True, f'{round(l0, 3)} -> {a} -> {b}')
 
-    # ---- c2) every Synths pad (page 4). It acts on the song last shown: Disco here (page 4 is reached through page 3).
+    # ---- c2) every Synths pad (page 4). It acts on the song playing (the transition above: Lowdown), not on Disco's page 3 passed on the way.
     # Hold pads: a click holds, a second click lets go. Others: one click, its param checked. Auto / phrase: put back after.
-    page(1); page(len(L0['pages']) - 1); P = synths.pads(len(L0['pages']) - 2)
+    page(1); page(len(L0['pages']) - 1); P = synths.pads(get()['launchpad']['song'])
     rows3 = {r['base']: r for r in get()['launchpad']['rows']}
     AC, AR = (lambda i: prm(S.ACID, i)), (lambda i: prm(synths.ARP, i))
     phrase0 = next((31 + i for i in rlit(31) if i in (2, 3)), None)
@@ -216,10 +217,11 @@ try:
             back = maps.to_cc(f, v0); post('/set', {'cc': cc, 'value': back}); c = prm(mod, pid)
             check(f'MiniLab {tag} cc {cc} {label}', label == ctl['label'] and near(a, f(0), tol) and near(b, f(127), tol) and near(c, f(back), tol),
                   f'{round(v0, 3)}: 0 -> {round(a, 3)} (want {f(0)}), 127 -> {round(b, 3)} (want {f(127)}), back {round(c, 3)}')
-    for pg in range(len(L0['pages'])):
-        if S.PAGES[pg].get('synth'): continue                                    # the mix map follows songs only
-        page(pg); time.sleep(0.5); sweep_ccs(f'mix page {pg + 1}', maps.mix_map(pg))
-    page(0)
+    song = get()['launchpad']['song']; want = [maps.mix_map(song)[c][3] for c in maps.FADERS]
+    for pg in range(len(L0['pages'])):                                           # the mix map follows the song playing, whatever page is on show
+        page(pg); time.sleep(0.5); labs = [c['label'] for c in get()['minilab']['faders']]
+        check(f'MiniLab mix labels on page {pg + 1} = {S.PAGES[song]["name"]} (playing)', labs == want, f'{labs}')
+    sweep_ccs(f'mix {S.PAGES[song]["name"]}', maps.mix_map(song)); page(0)
 
     # ---- e) MiniLab pads, mix mode: pick beat i (on), same pad again = off
     maps.drum_machine(False)

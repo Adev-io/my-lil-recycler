@@ -1,7 +1,9 @@
 # Launchpad Mini MK3 (Programmer mode) -> the set by rows. Each row in sections.ROWS = one slot (row 1 vocals, row 2 keys ...):
 # a pad picks that row's sample (blinking blue = playing), the lit pad again mutes the row. Pressed pad flashes white.
 # Row 8 (fx.FX) = transition moves; a toggled move blinks blue, pressing it again releases it. The moves row is on every page.
-# Bank 3 vox 1/4 .. 1/32 = Recycler STUT on the vocals of the song on show, held while the pad is down (a page click toggles).
+# Bank 3 vox 1/4 .. 1/32 = Recycler STUT on the vocals of the song playing, held while the pad is down (a page click toggles).
+# The song playing (state['song'], playing()) = the song last brought in by 'transition'; the arp's keys, the acid set, the MiniLab
+# mix map and the Synths page follow it, never the page on show (passing the Disco page on the way to Synths changes nothing).
 # Top-row Drums / Keys / User buttons (CC 96/97/98) = MiniLab program: drums + mix map (minilab.py) / Synths (acid.py) /
 # Acid Env (acid.py env: filter + amp ADSR). Top-row Session button (CC 95) = drum machine (My lil Drums) on / off, lit yellow = on.
 # Top-row arrows left/right (CC 93/94) = previous/next page (sections.PAGES: 1 Lowdown, 2 Time Out Of Mind, 3 Disco Ulysses, 4 Synths). A page turn changes
@@ -9,7 +11,7 @@
 # Right column round button at a row's end (CC row base + 8, 29 drums .. 89 vocals) = that row's next pad page (sections.pages: samples,
 # samples2, then chop pages = 4-bar A/B halves from chops.json), wrapping to the first; pads only. Dim on page 1, row colour on samples2,
 # row colour pulsing on a chop page, dark on rows with one page. A pad is lit only if its sample is the one playing.
-# Page 4 Synths (synths.py): acid patterns / moves, held fills, arp dir / oct / interval, auto change; the moves row acts on the song last shown.
+# Page 4 Synths (synths.py): acid patterns / moves, held fills, arp dir / oct / interval, auto change; it and the moves row there act on the song playing.
 # MIDI only plus one MCP batch per press; sections.py and fx.py are reloaded per press. Stops when pads.stop exists. Log: pads.log.
 import os, sys, time, threading, traceback, importlib, subprocess, mido
 here = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, here)
@@ -56,7 +58,8 @@ lp_send(PROG)
 R = lambda: sections.PAGES[state['page']]['rows']                # rows of the page on show
 ON = lambda: state['on'][state['page']]                          # row -> playing index, for that page
 SYN = lambda: bool(sections.PAGES[state['page']].get('synth'))    # the Synths page on show
-SP = lambda: state['song']                                        # the song the moves act on: the song page last shown
+PLAY = lambda: state['song']                                      # the song playing: last brought in by 'transition' (see playing()); never a page turn
+SP = lambda: state['song'] if SYN() else state['page']            # the song the moves row acts on: the song page on show (Synths page: the song playing)
 HOLD = ('fill', 'roll', 'octjump')                                # Synths pads that act while held (a page click toggles)
 HOLDL = threading.RLock()                                        # hold on / let go one at a time (RLock: synth_act calls let_go)
 ELOCK = threading.Lock()                                         # acid / arp entry: generation bump + direction, and a run's end check
@@ -118,7 +121,7 @@ def paint():
     for n in range(11, 90): led(n, 0)
     if SYN():                                                    # Synths page: what is live now (or held) blinks, like the sample rows
         lit = state['slit'] | state['held']
-        for n in synths.pads(SP()):
+        for n in synths.pads(PLAY()):
             if n in lit: led(n, 0); led(n, 45, ch=1)
             else: led(n, synths.ROWS[n // 10 * 10 + 1][1])
     for b, r in R().items():
@@ -150,11 +153,12 @@ def turn(d):                                                    # arrow: next / 
             except Exception: LOG.write(traceback.format_exc())  # keeps the old slit
             paint()
         threading.Thread(target=look, daemon=True).start()
-    else:
-        state['song'] = p
-        threading.Thread(target=lambda: synths.follow(SP), daemon=True).start()     # the arp's keys follow the song (last song shown wins)
-    open(os.path.join(here, 'page.txt'), 'w').write(str(SP()))   # the MiniLab (minilab.py, page) follows the song, not the Synths page
-    LOG.write(time.ctime() + f" page {p + 1} {sections.PAGES[p]['name']}\n"); paint(); return True
+    LOG.write(time.ctime() + f" page {p + 1} {sections.PAGES[p]['name']}\n"); paint(); return True   # the song playing stays: arp keys, acid set, MiniLab
+def playing(p):                                                 # the song playing is now p: the arp's keys, the Synths page acid set and the MiniLab
+    state['song'] = p                                            # mix map (minilab.py reads page.txt) follow it. Set by a finished transition, at
+    open(os.path.join(here, 'page.txt'), 'w').write(str(p))     # startup (fx.playing) and by a song pad pressed while no other song is heard
+    threading.Thread(target=lambda: synths.follow(PLAY), daemon=True).start()   # PLAY read inside ARP_LOCK: the latest song wins
+    LOG.write(time.ctime() + f" playing {sections.PAGES[p]['name']}\n")
 def sweep(to, gen, decks):                                      # the song's decks: base -> target over SWEEP_SECS, stops if another move takes over
     n = int(fx.SWEEP_SECS / fx.STEP)
     for k in range(1, n + 1):
@@ -188,11 +192,12 @@ def fx_act(name):
             threading.Thread(target=fx.dnb_on, args=(snap, alive), daemon=True).start()
     elif name == 'transition':                                    # hand over to the song on show over 8 bars; runs once, blinks while it runs
         if name in state['fx']: return
-        state['tgen'] += 1; g = state['tgen']; state['fx'].add(name)
+        state['tgen'] += 1; g = state['tgen']; state['fx'].add(name); to = SP()   # the song pressed for, whatever page is on show when it ends
         def run():
-            try: done = fx.transition(SP(), state['on'], lambda: state['tgen'] == g)
+            try: done = fx.transition(to, state['on'], lambda: state['tgen'] == g)
             except Exception: LOG.write(traceback.format_exc()); done = False
-            state['fx'].discard(name); LOG.write(time.ctime() + f" transition to {sections.PAGES[SP()]['name']} {'done' if done else 'cut off'}\n"); paint()
+            if done: playing(to)                                  # handed over: the arp, acid set and MiniLab follow (a cut-off one changes nothing)
+            state['fx'].discard(name); LOG.write(time.ctime() + f" transition to {sections.PAGES[to]['name']} {'done' if done else 'cut off'}\n"); paint()
         threading.Thread(target=run, daemon=True).start()
     elif name in fx.STRIP_TOGGLE:                                  # in / out; lit = in. Out remembers the level, in puts it back
         k, dflt = fx.STRIP_TOGGLE[name]; cur = fx.strips()[k]
@@ -278,8 +283,8 @@ def release(name):                                              # put a bank-2 m
     if name == 'acid sweep': state['agen'] += 1; fx.acid_cutoff(s)
     elif name in fx.SLOT_TOGGLE: fx.slot_level(s[0], s[1], s[2])
     elif name == 'breakdown': fx.set_deck_filters(s[0], s[1]); fx.set_strip_map(s[2])
-def vox(note, name, hw):                                        # bank 3 vox pad press: hold on the song on show's own deck (fx.vox_on)
-    with HOLDL: fx.vox_on(state, note, name, fx.own_deck(SP()), hw)
+def vox(note, name, hw):                                        # bank 3 vox pad press: hold on the song playing's own deck (fx.vox_on):
+    with HOLDL: fx.vox_on(state, note, name, fx.own_deck(PLAY()), hw)   # a stutter is played by ear, so it takes what you hear, from any page
     LOG.write(time.ctime() + f" fx {name} -> vox held {sorted((n, x[1]) for n, x in list(state['vox'].items()))}\n")
 def vox_up(note):                                               # Launchpad note off on a held vox pad (never waits on busy)
     try:
@@ -295,7 +300,7 @@ def side(note, name, hw):                                       # vox holds + cl
     except Exception: LOG.write(traceback.format_exc())
     paint()
 def synth_act(note, hw=False):                                  # a Synths pad: one action, a held fill, or an auto setting
-    label, kind, arg = synths.pads(SP())[note]
+    label, kind, arg = synths.pads(PLAY())[note]
     if kind in HOLD:
         with HOLDL:                                              # a legato slide's let_go waits until this pad is in held
             if note in state['held']: return let_go(note)        # second click on the page = let go
@@ -314,7 +319,7 @@ def let_go(note):                                               # Launchpad note
         except KeyError: return
         s = state['saved'].pop(note, None)
         try:
-            P = synths.pads(SP()); label, kind, arg = P[note]
+            P = synths.pads(PLAY()); label, kind, arg = P[note]
             same = [n for n in sorted(state['held']) if P[n][1] == kind]   # another held pad on the same hold button (slide between fills)
             if not same: synths.hold(kind, arg, False, s)        # the last one off lets go (octjump: puts the octave back)
             elif kind != 'octjump': synths.hold(kind, P[same[-1]][2], True)   # the one still held keeps going
@@ -336,11 +341,12 @@ def act(note, hw=False):
             for pg, pon, pth in zip(sections.PAGES, state['on'], state['path']):   # rows sharing this deck slot, on any page, are no longer playing
                 for o, ro in pg['rows'].items():
                     if ro is not r and ro['slot'] == r['slot'] and ro.get('deck') == r.get('deck') and i is not None: pon[o] = None; pth[o] = None
+            if i is not None and pg0 != state['song'] and not set(fx.heard(fx.strips(), state['path'])) - {pg0}: playing(pg0)   # first song in
             LOG.write(time.ctime() + f" {r['name']} " + (os.path.basename(p) if p else 'muted') + '\n')
     except Exception: LOG.write(traceback.format_exc())
     state['acts'] += 1; state['busy'] = False; paint()
 def press(note, hw=False):                                      # hardware pad (hw) or a click on the page (board.py): same path
-    if not (pad(note) or note in MOVES() or (SYN() and note in synths.pads(SP()))): return False
+    if not (pad(note) or note in MOVES() or (SYN() and note in synths.pads(PLAY()))): return False
     led(note, 3); led(note, 3, ch=1)
     mv = MOVES().get(note)
     if mv in fx.VOX_STUT or mv == 'clean':                       # a hold / its slide / the panic button: never dropped by busy
@@ -361,13 +367,12 @@ def on_msg(msg):
     elif msg.type == 'control_change' and msg.value and msg.control == fx.BANK_CC: flip()
     elif msg.type == 'control_change' and msg.value and msg.control == MACHINE_CC: threading.Thread(target=machine, daemon=True).start()
     elif msg.type == 'control_change' and msg.value and msg.control in ROW_CC: rowflip(ROW_CC[msg.control])
-open(os.path.join(here, 'page.txt'), 'w').write('0')
 try: sections.base(strips=not os.environ.get('PADS_RESPAWN')); state['on'] = [sections.now(p['rows'], RP(k), state['path'][k]) if p['rows'] else {} for k, p in enumerate(sections.PAGES)]   # pads_keep.py sets PADS_RESPAWN after a crash: leave the mixer as it is
 except Exception: LOG.write(traceback.format_exc())
-def _scale():
-    try: synths.follow(SP)
-    except Exception: LOG.write(traceback.format_exc())
-threading.Thread(target=_scale, daemon=True).start()           # the arp's keys follow the page on show (own thread: a slow arp must not hold startup)
+try: state['song'] = fx.playing(fx.strips(), state['path'], state['page'])   # the song heard loudest (none / a tie: the song page on show)
+except Exception: LOG.write(traceback.format_exc())
+try: playing(state['song'])                                      # page.txt + the arp's keys (own thread: a slow arp must not hold startup)
+except Exception: LOG.write(traceback.format_exc())
 try: inp = lp(mido.get_input_names(), 'LPMiniMK3 MIDI'); inp = inp and mido.open_input(inp, callback=on_msg)
 except Exception as e: inp = None; LOG.write(time.ctime() + f' launchpad input open failed: {e}; the 5 s refresh retries\n')
 def auto_loop():                                                # phrase auto-change: one small move per phrase per enabled voice
@@ -380,7 +385,7 @@ def auto_loop():                                                # phrase auto-ch
         while time.time() < t0 and not os.path.exists(STOP): time.sleep(0.25)
         if state['auto'] and not state['held'] and not state['busy'] and 'dnb' not in state['fx']:
             try:
-                did = synths.auto_step(SP(), set(state['auto']))
+                did = synths.auto_step(PLAY(), set(state['auto']))
                 LOG.write(time.ctime() + ' auto ' + ', '.join(did) + '\n')
                 if SYN(): state['slit'] = synths.lit(state); paint()
             except Exception: LOG.write(traceback.format_exc())

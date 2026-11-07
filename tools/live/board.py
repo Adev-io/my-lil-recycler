@@ -35,7 +35,7 @@ def launchpad():
     bank = ST['bank']
     return dict(rows=rows, page=pg, pages=[p['name'] for p in S.PAGES], bank=bank, banks=len(fx.BANKS), machine=ST['machine'],
                 fx=[dict(note=n, name=nm, on=nm in ST['fx'] or nm in fx.vox_lit(ST)) for n, nm in sorted(fx.BANKS[bank].items())],
-                color=fx.COLOR, busy=ST['busy'], hw=ST['hw'])
+                color=fx.COLOR, busy=ST['busy'], hw=ST['hw'], song=ST['song'])   # song: the song playing (pads.py PLAY)
 def minilab():
     importlib.reload(maps); m = mode(); M = maps.MODES[m]; pm, pp, off, n = M['pads']; CC = ccmap(m)
     p = params({mod for mod, *_ in CC.values()} | {pm})
@@ -48,7 +48,7 @@ def minilab():
     cur = round(p[pm][pp]) if pp in p[pm] else None; live = m != 'mix' or p[pm].get(5, 0) > 0.001          # mix: beat pads dark while the drum beat is off
     return dict(mode=m, title=M['title'], knobs=[ctl(c) for c in maps.KNOBS], faders=[ctl(c) for c in maps.FADERS],
                 pads=[dict(i=i, label=M['pad_label'](off + i), on=live and cur == off + i) for i in range(n)], keys=M['keys'])
-ccmap = lambda m: maps.mix_map() if m == 'mix' else maps.MODES[m]['cc']   # mix follows the song on show
+ccmap = lambda m: maps.mix_map() if m == 'mix' else maps.MODES[m]['cc']   # mix follows the song playing
 def set_cc(cc, v):
     mod, pid, f, _ = ccmap(mode())[cc]
     S.call('vcvrack_set_params', {'moduleId': mod, 'params': [{'id': pid, 'value': f(max(0, min(127, v)))}]}); cache['t'] = 0

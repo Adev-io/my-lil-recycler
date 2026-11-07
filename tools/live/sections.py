@@ -133,7 +133,7 @@ SCALES = {0: (1, 2, 4, 6, 7, 9, 11), 1: (1, 2, 4, 6, 7, 9, 11), 2: (1, 3, 4, 6, 
 # and 12 (F#/B pump) sit inside B major; 2 (E D F# B, starts on E like the record's bar 1) and 22 (C# D F# B) add only D natural,
 # the blue note of the record's own verse riff. No vamp for this song: the tonic pattern goes first.
 ACID_SONG = {0: [10, 8, 9], 1: [14, 15, 16, 19], 2: [25, 12, 2, 22]}
-PAGES.append(dict(name='Synths', rows={}, synth=True))   # page 4: arp + acid controls (synths.py); moves act on the song last shown
+PAGES.append(dict(name='Synths', rows={}, synth=True))   # page 4: arp + acid controls (synths.py); it and its moves act on the song playing
 def base(strips=True):                                         # deck A + deck B strips; deck A slots without a row silent (strips=False: mixer strips untouched, a crash respawn)
     mix = {p['id']: p['value'] for p in json.loads(call('vcvrack_get_params', {'moduleId': MIX}))}
     if mix[3] < 0.05:                                          # deck B was closed: its page starts silent, then the strip opens

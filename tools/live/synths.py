@@ -1,5 +1,5 @@
 # My lil Arpeggio + My lil Acid Bass helpers for the live set (rig ids in sections.py, voice.json, triple.json).
-# Phase 1: the arp's keys follow the song page (sections.SCALES), held by the Arpeggio's scale lock so a stray click cannot move them.
+# Phase 1: the arp's keys follow the song playing (sections.SCALES, pads.py PLAY; never a page turn), held by the Arpeggio's scale lock so a stray click cannot move them.
 import json, os, threading
 import sections as S
 ARP = json.load(open(os.path.join(S.here, 'voice.json')))['ARP']
@@ -13,7 +13,7 @@ def arp_data(**kv):                          # read-modify-write of the arp's mo
         st = json.loads(S.call('vcvrack_get_module_state', {'id': ARP})); st['data'].update(kv)
         st.pop('params', None)               # params stay as Rack has them now (checked live 2026-11-06: a state without 'params' leaves OCT and the keys alone)
         S.call('vcvrack_set_module_state', {'id': ARP, 'state': st}); return st['data']
-def set_scale(page):                         # page 0 Lowdown, 1 Time Out Of Mind, 2 Disco Ulysses; any other page keeps the scale playing
+def set_scale(page):                         # song page 0 Lowdown, 1 Time Out Of Mind, 2 Disco Ulysses; any other page keeps the scale playing
     if page not in S.SCALES: return None
     m = mask_of(S.SCALES[page])
     with ARP_LOCK:
@@ -21,7 +21,7 @@ def set_scale(page):                         # page 0 Lowdown, 1 Time Out Of Min
         if d.get('locked') and d.get('lockedMask') == m: return m
         arp_data(locked=True, lockedMask=m)  # the module forces the 12 key latches itself while locked
     return m
-def follow(get_page):                        # the page is read inside the lock, so the last page turn wins
+def follow(get_page):                        # the song is read inside the lock, so the last change wins
     with ARP_LOCK: return set_scale(get_page())
 def scale_now():
     d = json.loads(S.call('vcvrack_get_module_state', {'id': ARP}))['data']
@@ -72,7 +72,7 @@ FILLS61 = (('acid roll', 'fill', 0), ('acid oct', 'fill', 1), ('acid acc', 'fill
 ARP51 = tuple((l, 'dir', i) for i, l in enumerate(('up', 'down', 'up-dn', 'rnd'))) + tuple((f'oct {n}', 'oct', n) for n in range(1, 5))
 INT41 = (('3rd', 'int', 2), ('4th', 'int', 3), ('5th', 'int', 4), ('6th', 'int', 5), ('octave', 'int', 7))
 AUTO31 = (('auto acid', 'auto', 'acid'), ('auto arp', 'auto', 'arp'), ('8 bars', 'phrase', 8), ('16 bars', 'phrase', 16))
-def pads(song):                                                      # note -> (label, kind, arg); row 8 follows the song last shown
+def pads(song):                                                      # note -> (label, kind, arg); row 8 follows the song playing
     import maps                              # here, not at the top: maps does 'from synths import ARP, TRI', so a top-level import is a cycle
     P = {81 + i: (maps.acid_name(v), 'pattern', v) for i, v in enumerate(S.ACID_SONG[song][:8])}
     for base, row in ((71, MOVES71), (61, FILLS61), (51, ARP51), (41, INT41), (31, AUTO31)):

@@ -133,8 +133,12 @@ try:
     page(2); press(17); time.sleep(18)
     check('transition to Disco: Lowdown out, Disco pad 1 rows in, strip 8 up', lv(S.A) == [0.0] * 4 and lv(S.D)[1] == 1.0 and lv(S.D)[0] == 1.0 and path(C, 0).startswith('1-drums-08_chorus')
           and st()[7] == U and st()[2] == U, f'A {lv(S.A)} D {lv(S.D)} strips {st()}')
-    page(0); press(17); time.sleep(18)
+    page(0); time.sleep(1)                                             # the song playing follows the transition, never the page on show
+    check('Disco playing: arp B major (3418) + MiniLab on deck D, also with the Lowdown page on show', get()['launchpad']['song'] == 2 and synths.scale_now() == 3418
+          and get()['minilab']['faders'][1]['label'] == 'piano vol' and maps.page_now() == 2, f"song {get()['launchpad']['song']} scale {synths.scale_now()}")
+    press(17); time.sleep(18)
     check('transition Disco -> Lowdown: Disco out, strip 8 back to 0', lv(S.D) == [0.0] * 4 and st()[7] == 0.0 and lv(S.A)[1] == 1.2 and path(C, 0).startswith('1-drums-15'), f'A {lv(S.A)} D {lv(S.D)} strips {st()}')
+    check('Lowdown playing again: arp D major (2774)', get()['launchpad']['song'] == 0 and synths.scale_now() == 2774, f"song {get()['launchpad']['song']} scale {synths.scale_now()}")
     press(11); time.sleep(2); press(18)
     check('clean: filters at rest, strips open', [round(x, 2) for x in fx.deck_filters(S.A)] == fx.BASEF[S.A] and st()[2:5] == [U, U, U] and not fxon('sweep up'))
 
@@ -169,17 +173,18 @@ try:
     bank(2); a = st()[4]; press(11); time.sleep(fx.bars_secs(fx.FADE_BARS) + 1); b = st()[4]; press(11); time.sleep(fx.bars_secs(fx.FADE_BARS) + 1)
     check('drums in/out fades tracked drums out and back', a > 0.5 and b == 0 and abs(st()[4] - a) < 0.01, f'{a} -> {b} -> {st()[4]}')
     VS = fx.STUT + fx.VOX_SLOT                                         # vox stutter (Recycler 2.4.0): a page click holds, again lets go
-    for pg, d, o in ((0, S.A, S.B), (1, S.B, S.A), (2, S.D, S.A)):          # Disco: slot 3 = horns/synth (no vocals)
+    song = get()['launchpad']['song']; d = fx.own_deck(song); o = S.B if d != S.B else S.A   # on the song playing (what you hear) from every page
+    for pg in (0, 1, 2, 3):
         n = len(json.loads(S.call('vcvrack_get_params', {'moduleId': d})))
         if n <= fx.STUTLEN: print(f'SKIP  vox 1/8 on page {pg + 1}  deck has {n} params (Recycler before 2.4.0)', flush=True); continue
         page(pg); press(13); a = (prm(d, VS), prm(d, fx.STUTLEN), prm(o, VS), fxon('vox 1/8')); press(13); b = (prm(d, VS), fxon('vox 1/8'))
-        check(f'vox 1/8 on page {pg + 1} holds its vocals stutter at 1/8, click again lets go', a == (1.0, 1.0, 0.0, True) and b == (0.0, False), f'held {a} let go {b}')
+        check(f'vox 1/8 on page {pg + 1} holds the song playing ({S.PAGES[song]["name"]}) at 1/8, click again lets go', a == (1.0, 1.0, 0.0, True) and b == (0.0, False), f'held {a} let go {b}')
     page(0); bank(0)
 
-    # ---- Synths page (page 4): it acts on the song last shown, here Disco (page 4 is reached through page 3)
+    # ---- Synths page (page 4): it acts on the song playing, here Lowdown (the last transition), though page 4 is reached through Disco's page 3
     page(1); page(3); names = [r['name'] for r in get()['launchpad']['rows']]; time.sleep(1)
     check('Synths page rows', get()['launchpad']['page'] == 3 and names == ['acid patterns', 'acid moves', 'fills (hold)', 'arp dir / oct', 'arp interval', 'auto change'], f'{names}')
-    check('arp scale follows Disco: B major (mask 3418)', synths.scale_now() == 3418, f'{synths.scale_now()}')
+    check('passing the Disco page leaves the arp on Lowdown: D major (mask 2774)', get()['launchpad']['song'] == 0 and synths.scale_now() == 2774, f'{synths.scale_now()}')
     AC, AR = (lambda i: prm(S.ACID, i)), (lambda i: prm(synths.ARP, i))
     press(76); a = AC(28); press(75); b = AC(28)
     check('tr +5 then tr 0 transpose the Acid', a == 5 and b == 0, f'{a} {b}')
@@ -197,11 +202,11 @@ try:
     check('arp x2: click holds roll 2, click again lets go', a == (1.0, 2.0) and b == 0.0, f'{a} {b}')
     press(31); a = 0 in row('auto change')['lit']; press(31); b = 0 in row('auto change')['lit']
     check('auto acid on (lit) / off', a and not b, f'{a} {b}')
-    press(82); check('acid patterns pad 2 = Disco pattern 2', AC(24) == S.ACID_SONG[2][1] and 1 in row('acid patterns')['lit'], f'{AC(24)} want {S.ACID_SONG[2][1]}')
+    press(82); check('acid patterns pad 2 = Lowdown pattern 2', AC(24) == S.ACID_SONG[0][1] and 1 in row('acid patterns')['lit'], f'{AC(24)} want {S.ACID_SONG[0][1]}')
     press(11); time.sleep(4); fa, fd = fx.deck_filters(S.A), fx.deck_filters(S.D); press(11)
-    check('sweep up on the Synths page moves Disco (deck D) only', fd[0] > 0.2 and [round(x, 2) for x in fa] == fx.BASEF[S.A] and [round(x, 2) for x in fx.deck_filters(S.D)] == fx.BASEF[S.D],
+    check('sweep up on the Synths page moves Lowdown (deck A) only', fa[0] > 0.2 and [round(x, 2) for x in fd] == fx.BASEF[S.D] and [round(x, 2) for x in fx.deck_filters(S.A)] == fx.BASEF[S.A],
           f'A {[round(x, 2) for x in fa]} D {[round(x, 2) for x in fd]}')
-    page(0); time.sleep(1); check('arp scale back to D major on Lowdown (mask 2774)', synths.scale_now() == 2774, f'{synths.scale_now()}')
+    page(2); time.sleep(1); check('Disco page on show, not playing: arp stays D major (mask 2774)', synths.scale_now() == 2774, f'{synths.scale_now()}'); page(0)
 
     # ---- drums
     l0 = prm(S.DRUMS, 5); r1 = post('/machine'); r2 = post('/machine')
@@ -213,11 +218,11 @@ try:
     post('/set', {'pad': p0}); c = (S.current_drum_pattern() - 1, prm(S.DRUMS, 5) > 0)
     check('beat pads: pick, same again = off, any = on', a == (tp + 1, True) and b is False and c == (p0, True), f'{a} {b} {c}')
 
-    # ---- MiniLab follows the song on show
-    for pg, d, nm in ((0, S.A, 'keys vol'), (1, S.B, 'piano vol'), (2, S.D, 'piano vol')):
+    # ---- MiniLab follows the song playing (Lowdown here), whatever page is on show
+    for pg, d, nm in ((0, S.A, 'keys vol'), (1, S.A, 'keys vol'), (2, S.A, 'keys vol'), (3, S.A, 'keys vol')):
         page(pg); time.sleep(0.5); v0 = prm(d, 15); lab = get()['minilab']['faders'][1]['label']
         post('/set', {'cc': 83, 'value': 64}); v1 = prm(d, 15); post('/set', {'cc': 83, 'value': maps.to_cc(maps.fader, v0)})
-        check(f'MiniLab fader 2 on page {pg + 1} = {nm}', lab == nm and abs(v1 - maps.fader(64)) < 0.01, f'{round(v0, 2)} -> {round(v1, 2)}')
+        check(f'MiniLab fader 2 on page {pg + 1} = Lowdown {nm}', lab == nm and abs(v1 - maps.fader(64)) < 0.01, f'{round(v0, 2)} -> {round(v1, 2)}')
     page(0)
     post('/mode', {'mode': 'acid'}); time.sleep(3); a = get()['minilab']['faders'][0]['label']
     post('/mode', {'mode': 'mix'}); time.sleep(3); b = get()['minilab']['faders'][0]['label']

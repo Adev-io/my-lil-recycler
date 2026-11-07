@@ -29,6 +29,16 @@ BASEF = {S.A: BASE[0:4], C: BASE[4:5], S.B: BASE[5:9], S.D: [0.0] * 4}   # resti
 REST = {S.D: 0.0}                                                  # strip level a deck rests at after a transition out (else unity)
 TRANS_SECS = 16.0                                                  # 8 bars at 120: the loops a transition brings in land inside it
 FIRST = (71, 41, 21)                                               # silent song on show: a transition brings in pad 1 of these rows
+def heard(mix, paths):                                             # song page -> its strip level, for the songs you hear: strip open and a
+    out = {}                                                       # row on its own deck playing (paths: pads.py state['path'], per page row -> sample)
+    for k, p in enumerate(S.PAGES):
+        if not p['rows']: continue
+        lv = mix[STRIP[own_deck(k)]]
+        if lv > 0.001 and any(paths[k].get(b) for b, r in p['rows'].items() if r.get('deck', S.A) == own_deck(k)): out[k] = lv
+    return out
+def playing(mix, paths, page):                                     # startup: the song heard loudest; a tie -> the page on show if tied, else the
+    h = heard(mix, paths); top = [k for k, v in h.items() if v == max(h.values())] if h else []   # first; none -> the page on show if a song, else 0
+    return (page if page in top else top[0]) if top else page if S.PAGES[page]['rows'] else 0
 def song_decks(page, on):
     return [own_deck(page)] + ([C] if on[page].get(21) is not None else [])
 def deck_filters(d): return [p['value'] for p in json.loads(S.call('vcvrack_get_params', {'moduleId': d})) if 24 <= p['id'] < 24 + len(BASEF[d])]
@@ -116,7 +126,7 @@ def acid_cutoff(v=None):                                           # My lil Acid
 def bars_secs(n): return n * 4 * 60.0 / bpm()
 
 # Bank 3 vox stutter (2026-11-06, Recycler 2.4.0 STUT, docs/superpowers/specs/2026-11-06-recycler-stutter-design.md): hold pads on the
-# vocals slot of the song on show. state['vox'] = {note: (deck, name, hw)} in press order; pads.py calls these under HOLDL.
+# vocals slot of the song playing (pads.py PLAY). state['vox'] = {note: (deck, name, hw)} in press order; pads.py calls these under HOLDL.
 STUT, STUTLEN, VOX_SLOT = 40, 44, 3                                # STUT_PARAM 40-43 (hold per slot), STUTLEN_PARAM 44 (0 = 1/4 bar .. 3 = 1/32)
                                                                    # Disco has no vocals: slot 3 there = horns/synth, so vox pads stutter the horns
 VOX_STUT = {'vox 1/4': 0, 'vox 1/8': 1, 'vox 1/16': 2, 'vox 1/32': 3}

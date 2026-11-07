@@ -14,7 +14,7 @@ STOP = os.path.join(here, 'minilab.stop')
 KEYS_LO, KEYS_HI = 48, 72                     # the 25 keys at the default octave (C2..C4 in Arturia naming); other octaves clamp
 TICK, REFRESH, TOL = 0.08, 1.0, 0.05          # TOL ~ 4 MIDI steps either side of Rack's value counts as caught
 import maps                                   # the map lives in maps.py (shared with the virtual controller page)
-MAP = dict(maps.mix_map())                    # CC -> (deck, param, scale, label); follows the Launchpad page (refresh)
+MAP = dict(maps.mix_map())                    # CC -> (deck, param, scale, label); follows the song playing (page.txt, refresh)
 PG = [maps.page_now()]
 pending, cur, prev, eng, seen, lock = {}, {}, {}, set(), set(), threading.Lock()
 log = lambda s: LOG.write(time.ctime() + ' ' + s + '\n')
@@ -41,7 +41,7 @@ def on_msg(m):
         if key not in seen: seen.add(key); log(f'unmapped {m}')
 def refresh():                                # Rack's values; a control whose value moved elsewhere must be picked up again
     pg = maps.page_now()
-    if pg != PG[0]:                           # page turned: faders / knobs 1-4 now the other song's tracks, all picked up afresh
+    if pg != PG[0]:                           # song changed: faders / knobs 1-4 now the other song's tracks, all picked up afresh
         with lock: MAP.clear(); MAP.update(maps.mix_map(pg)); eng.clear(); prev.clear(); PG[0] = pg
         log(f'page {pg + 1}: ' + ', '.join(l for _, _, _, l in MAP.values()))
     for deck in {d for d, _, _, _ in MAP.values()}:
