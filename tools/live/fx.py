@@ -307,6 +307,12 @@ def bars_secs(n): return n * 4 * 60.0 / bpm()
 STUT, STUTLEN, VOX_SLOT = 40, 44, 3                                # STUT_PARAM 40-43 (hold per slot), STUTLEN_PARAM 44 (0 = 1/4 bar .. 3 = 1/32)
                                                                    # Disco has no vocals: slot 3 there = horns/synth, so vox pads stutter the horns
 VOX_STUT = {'vox 1/4': 0, 'vox 1/8': 1, 'vox 1/16': 2, 'vox 1/32': 3}
+def vox_deck(mix, paths, page, song):                             # the vocals you hear (2026-11-07: song playing = Disco while Lowdown vocals
+    def on(k):                                                     # were up -> vox stuttered Disco's muted horns): the page on show, then the song
+        if not S.PAGES[k]['rows']: return False                    # playing, then any song, whose strip is open and its slot 3 row playing;
+        d = own_deck(k)                                            # none -> the song playing (old rule)
+        return mix[STRIP[d]] > 0.001 and any(paths[k].get(b) for b, r in S.PAGES[k]['rows'].items() if r['slot'] == VOX_SLOT and r.get('deck', S.A) == d)
+    return own_deck(next((k for k in [page, song] + list(range(len(S.PAGES))) if on(k)), song))
 def vox_stut(deck, div):                                           # div None = let go; else length + hold in one call
     S.call('vcvrack_set_params', {'moduleId': deck, 'params': [{'id': STUT + VOX_SLOT, 'value': 0.0}] if div is None else
                                   [{'id': STUTLEN, 'value': float(div)}, {'id': STUT + VOX_SLOT, 'value': 1.0}]})

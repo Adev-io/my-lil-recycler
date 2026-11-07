@@ -151,6 +151,12 @@ finally:
 assert {n: fx.FX3[n] for n in (12, 13, 14, 15)} == {12: 'vox 1/4', 13: 'vox 1/8', 14: 'vox 1/16', 15: 'vox 1/32'} and fx.FX3[11] == 'drums in/out'
 assert (fx.STUT, fx.STUTLEN, fx.VOX_SLOT) == (40, 44, 3) and fx.VOX_STUT == {'vox 1/4': 0, 'vox 1/8': 1, 'vox 1/16': 2, 'vox 1/32': 3}
 real_vox = dict(call=S.call, vox_stut=fx.vox_stut)
+vrow = lambda k: next(b for b, r in S.PAGES[k]['rows'].items() if r['slot'] == fx.VOX_SLOT and r.get('deck', S.A) == fx.own_deck(k))   # vox_deck: the vocals you hear
+vmix = [0.0] * 8; vmix[2] = vmix[7] = S.U; vp = [{vrow(0): 'x'}, {}, {}, {}]
+assert fx.vox_deck(vmix, vp, 0, 2) == S.A and fx.vox_deck(vmix, vp, 2, 2) == S.A        # Disco playing, horns muted, Lowdown vocals up: Lowdown
+vp[2] = {vrow(2): 'y'}; assert fx.vox_deck(vmix, vp, 2, 0) == S.D and fx.vox_deck(vmix, vp, 0, 2) == S.A   # both up: page on show wins
+assert fx.vox_deck(vmix, vp, 3, 2) == S.D and fx.vox_deck(vmix, [{}, {}, {}, {}], 3, 1) == S.B           # Synths page: song playing; none heard: song playing
+vmix[2] = 0.0; assert fx.vox_deck(vmix, vp, 0, 0) == S.D                                 # Lowdown strip shut: not heard
 try:                                                                            # bank 3 vox stutter holds (pads.py: vox / vox_up / clean -> fx.vox_*)
     got = []; S.call = lambda name, args=None: got.append((name, args)) or '[]'
     fx.vox_stut(S.A, 2); fx.vox_stut(S.B, None)                                  # one set_params call each: length + hold, or the hold let go
@@ -230,14 +236,14 @@ class SyncThread:                                                               
     def __init__(s, target, args=(), daemon=None): s.t, s.a = target, args
     def start(s): s.t(*s.a)
 done = []; bank_ = [fx.FX3]
-P = dict(state={'busy': True, 'vox': {}, 'down': set(), 'held': set()}, fx=fx, MOVES=lambda: bank_[0], SYN=lambda: False, SP=lambda: 0, PLAY=lambda: 0, pad=lambda n: None,
+P = dict(state={'busy': True, 'vox': {}, 'down': set(), 'held': set(), 'page': 0, 'path': [{} for _ in S.PAGES]}, fx=fx, MOVES=lambda: bank_[0], SYN=lambda: False, SP=lambda: 0, PLAY=lambda: 0, pad=lambda n: None,
          led=lambda *a, **k: None, paint=lambda: None, LOG=types.SimpleNamespace(write=lambda s: None), HOLDL=threading.RLock(), CLEANL=threading.Lock(),
          threading=types.SimpleNamespace(Thread=SyncThread), traceback=__import__('traceback'), time=__import__('time'),
          fx_act=lambda name: done.append(('fx_act', name)), act=lambda note, hw=False: done.append(('act', note)), let_go=lambda n: None)
 exec(compile(ast.Module(body=fns, type_ignores=[]), 'pads.py', 'exec'), P)
 msg = lambda t, n, v=100: types.SimpleNamespace(type=t, note=n, velocity=v)
 try:
-    vs = []; fx.vox_stut = lambda d, div: vs.append((d, div)); A = fx.own_deck(0)
+    vs = []; fx.vox_stut = lambda d, div: vs.append((d, div)); A = fx.own_deck(0); real_strips_v = fx.strips; fx.strips = lambda: [0.0] * 8
     P['on_msg'](msg('note_on', 12)); P['on_msg'](msg('note_on', 13))             # busy the whole time (another press in flight)
     assert vs == [(A, 0), (A, 1)] and set(P['state']['vox']) == {12, 13}, vs        # second vox press while busy: NOT dropped
     P['on_msg'](msg('note_off', 12)); P['on_msg'](msg('note_on', 13, 0))            # (a note_on at velocity 0 = note off)
@@ -246,7 +252,7 @@ try:
     assert P['press'](11) is False and not done, done                             # other moves still wait on busy (drums in/out dropped)
     bank_[0] = fx.FX; assert P['press'](18) is True and done == [('fx_act', 'clean')], done   # clean (bank 1 pad 18) never dropped by busy
     assert P['state']['busy'] is True                                             # and leaves busy to the press that set it
-finally: fx.vox_stut = real_vox['vox_stut']
+finally: fx.vox_stut, fx.strips = real_vox['vox_stut'], real_strips_v
 R81 = S.ROWS[81]                                                                 # row page 2 (row-end round button, CC base + 8)
 assert maps.pad_labels(R81['samples2']) == ['15', '16', '12', '04', '04 choir', '14 choir', '15 choir'], maps.pad_labels(R81['samples2'])
 for pg in S.PAGES:

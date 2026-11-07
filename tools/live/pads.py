@@ -295,7 +295,8 @@ def release(name):                                              # put a bank-2 m
     elif name in fx.SLOT_TOGGLE: fx.slot_level(s[0], s[1], s[2])
     elif name == 'breakdown': fx.set_deck_filters(s[0], s[1]); fx.set_strip_map(s[2])
 def vox(note, name, hw):                                        # bank 3 vox pad press: hold on the song playing's own deck (fx.vox_on):
-    with HOLDL: fx.vox_on(state, note, name, fx.own_deck(PLAY()), hw)   # a stutter is played by ear, so it takes what you hear, from any page
+    d = fx.vox_deck(fx.strips(), state['path'], state['page'], PLAY())   # a stutter is played by ear, so it takes the vocals you hear
+    with HOLDL: fx.vox_on(state, note, name, d, hw)
     LOG.write(time.ctime() + f" fx {name} -> vox held {sorted((n, x[1]) for n, x in list(state['vox'].items()))}\n")
 def vox_up(note):                                               # Launchpad note off on a held vox pad (never waits on busy)
     try:
