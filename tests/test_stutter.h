@@ -129,6 +129,45 @@ inline void testStutter()
         check (ok && w == 666 && last == 999 && w2 == 666, "stut: uneven grid repeats 666..999", (double) w);
     }
 
+    // a press in the last fade window: the wrap comes with the gain still high, so it is flagged for the caller's declick
+    {
+        Stutter s;
+        s.step (298, 1000, 10, true, 10, g);   // tail 1 frame
+        const bool j1 = s.jumped();
+        s.step (299, 1000, 10, true, 10, g);
+        const bool j2 = s.jumped();
+        const size_t w = s.step (300, 1000, 10, true, 10, g);
+        check (! j1 && ! j2 && w == 200 && s.jumped(), "stut: a press at tail 1 flags the wrap as a jump", (double) w);
+        s.step (301, 1000, 10, true, 10, g);
+        check (! s.jumped(), "stut: the seam jump lasts one sample");
+        Stutter t;
+        t.step (298, 1000, 10, true, 10, g);
+        t.step (299, 1000, 10, true, 10, g);
+        t.recapture();
+        t.step (300, 1000, 10, true, 10, g);
+        check (! t.jumped(), "stut: a buffer change drops a pending seam jump (the swap fade covers it)");
+    }
+
+    // a faded seam is no jump
+    {
+        Stutter s;
+        bool any = false;
+        for (size_t t = 0; t < 300; ++t) { s.step (200 + t, 1000, 10, true, 10, g); any = any || s.jumped(); }
+        check (! any, "stut: faded seams never flag a jump");
+    }
+
+    // still in the first pass the read is the timeline: release and a length change are no jump (no +3 dB crossfade)
+    {
+        Stutter s;
+        for (size_t t = 0; t < 20; ++t) s.step (257 + t, 1000, 10, true, 10, g);
+        const size_t r = s.step (277, 1000, 10, false, 10, g);
+        check (r == 277 && ! s.jumped(), "stut: a release in the first pass is no jump", (double) r);
+        Stutter u;
+        for (size_t t = 0; t < 20; ++t) u.step (257 + t, 1000, 10, true, 10, g);
+        const size_t c = u.step (277, 1000, 20, true, 10, g);
+        check (c == 277 && ! u.jumped() && u.active(), "stut: a length change in the first pass is no jump", (double) c);
+    }
+
     // tiny: more slices than frames, an empty buffer, a slice too short to fade
     {
         Stutter s;

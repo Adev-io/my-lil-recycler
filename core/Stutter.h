@@ -21,20 +21,23 @@ struct Stutter
     // forward frame to read and sets gain (0..1, moves at most 1/fade a sample, so it has no steps).
     size_t step (size_t fwd, size_t frames, size_t slices, bool held, size_t fade, float& gain)
     {
-        jump = false;
-        if (frames == 0) { on = fresh = false; gain = g = 1.f; return 0; }
+        // a jump: the read leaves where the last sample's head goes on. The first pass reads the timeline, so leaving
+        // it is none (a crossfade of the same signal would bump +3 dB); a buffer change is covered by the swap fade.
+        jump = seamJump && ! fresh;
+        seamJump = false;
+        if (frames == 0) { on = fresh = jump = false; gain = g = 1.f; return 0; }
         slices = std::min (std::max (slices, (size_t) 1), frames);
         fwd %= frames;
         if (! held)
         {
-            jump = on && ! fresh;   // back to the timeline: the caller declicks the leap
+            jump = jump || (on && ! fresh && ! first);   // back to the timeline: the caller declicks the leap
             on = fresh = false;
             g = std::min (1.f, g + rate);
             gain = g;
             return fwd;
         }
-        if (! on || fresh || frames != n) capture (fwd, frames, slices);
-        else if (slices != grid) { capture (fwd, frames, slices); jump = true; }
+        if (! on || fresh || frames != n) { capture (fwd, frames, slices); jump = false; }
+        else if (slices != grid) { jump = jump || ! first; capture (fwd, frames, slices); }
 
         const size_t f = std::min (fade, len / 4);
         float env = 1.f;
@@ -48,13 +51,18 @@ struct Stutter
         g = std::min (g + rate, std::max (g - rate, env));
         gain = g;
         const size_t out = start + k;
-        if (++k >= len) { k = 0; first = false; }
+        if (++k >= len)
+        {
+            k = 0;
+            first = false;
+            seamJump = g > rate;   // the fade had no room (a press or slide in its window): the caller declicks the wrap
+        }
         return out;
     }
 
     void recapture() { fresh = true; }        // the slot's buffer changed: the next held sample takes the timeline again
     bool active() const { return on; }        // repeating a slice
-    bool jumped() const { return jump; }      // the last step left the timeline's read (release, length change)
+    bool jumped() const { return jump; }      // the last step leapt (release, length change, an unfaded wrap)
     float gain() const { return g; }          // the last gain (held while the slot has no buffer to step)
 
 private:
@@ -72,7 +80,7 @@ private:
 
     size_t start = 0, len = 1, k = 0, n = 0, grid = 0;
     float g = 1.f, rate = 1.f;
-    bool on = false, first = false, fresh = false, jump = false;
+    bool on = false, first = false, fresh = false, jump = false, seamJump = false;
 };
 } // namespace stut
 } // namespace recycler
