@@ -120,18 +120,27 @@ def vox_stut(deck, div):                                           # div None = 
                                   [{'id': STUTLEN, 'value': float(div)}, {'id': STUT + VOX_SLOT, 'value': 1.0}]})
 def vox_on(state, note, name, deck, hw):                           # a press: hold (another vox pad held on that deck = slide, no let go)
     if note in state['vox']: return vox_off(state, note)           # a held pad again (a page click) = let go
-    vox_stut(deck, VOX_STUT[name]); state['vox'][note] = (deck, name, hw)   # held only once the rig took it
-    if hw and note not in state['down']: vox_off(state, note)     # quick stab: the pad came up before the hold landed
+    state['vox'][note] = (deck, name, hw)                          # recorded before the write: a false 'held' is safe to let go, a false
+    try: vox_stut(deck, VOX_STUT[name])                            # 'not held' is not (a failed write stays held + lit and raises)
+    finally:
+        if hw and note not in state['down']:                       # quick stab: the pad came up before the hold landed
+            try: vox_off(state, note)
+            except Exception: vox_off(state, note)                 # one retry; a second failure raises, the pad stays held: press / clean
     return True
 def vox_off(state, note):                                          # let go; the deck it started on, whatever page is on show now
     v = state['vox'].get(note)
     if v is None: return False                                     # already let go (clean, a page click, the other release path)
-    same = [n for n, x in state['vox'].items() if x[0] == v[0]]   # vox pads held on that deck, press order
+    same = [n for n, x in list(state['vox'].items()) if x[0] == v[0]]   # vox pads held on that deck, press order
     if len(same) == 1: vox_stut(v[0], None)                        # the last one off lets go
     elif same[-1] == note: vox_stut(v[0], VOX_STUT[state['vox'][same[-2]][1]])   # the latest off: back to the length of the one still held
     del state['vox'][note]; return True                            # (a failed write above leaves it held: the next press / clean tries again)
-def vox_clean(state):                                              # clean: every held vox stutter let go
-    for d in {x[0] for x in state['vox'].values()}:
-        vox_stut(d, None)                                          # a failed write keeps that deck's pads held
-        for n in [n for n, x in state['vox'].items() if x[0] == d]: del state['vox'][n]
+def vox_clean(state):                                              # clean: every held vox stutter let go, each deck on its own
+    err = None
+    for d in {x[0] for x in list(state['vox'].values())}:
+        try: vox_stut(d, None)
+        except Exception as e: err = err or e; continue            # a failed write keeps that deck's pads held; the other deck still goes
+        for n in [n for n, x in list(state['vox'].items()) if x[0] == d]: del state['vox'][n]
+    if err: raise err
 def vox_lit(state): return {x[1] for x in list(state['vox'].values())}   # lit from the holds, not state['fx']: the 5 s refresh never touches them
+STUT_IDS = range(STUT, STUTLEN + 1)                                # a restore of a Recycler never writes these: no hold left on, none dropped
+def no_stut(params): return [p for p in params if p['id'] not in STUT_IDS]

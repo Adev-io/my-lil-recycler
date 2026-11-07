@@ -21,6 +21,7 @@ for mid, nm in NAMES.items():
         if ls != ss: drift.append(f'DeckA slots {ls} -> {ss}')
     if nm == 'Drums' and live['data'].get('patterns') != saved[mid]['data'].get('patterns'): drift.append('Drums patterns edited (restored from the save)')
     st = {k: v for k, v in saved[mid].items() if k not in ('pos', 'leftModuleId', 'rightModuleId')}
+    if nm.startswith('Deck'): st['params'] = [p for p in st['params'] if not 40 <= p['id'] <= 44]   # Recycler STUT 40-44 (fx.STUT_IDS): never restored held
     r = call('vcvrack_set_module_state', {'id': mid, 'state': st})
     if 'error' in r.lower() or 'fail' in r.lower(): print(nm, 'restore reply:', r[:200])
 time.sleep(1.5)

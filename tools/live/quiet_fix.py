@@ -25,6 +25,7 @@ for m in decks:
             new = min(cand, key=lambda f: abs(int(re.search(r'-(\d\d)', f).group(1)) - n)) if cand else None
             print(f"{d.get('title')}: slot {os.path.basename(s['path'])} -> {new}")
             if new: s['path'] = d['folder'].replace('\\', '/') + '/' + new; changed = True
+    st.pop('params', None)                                  # data only: params stay as Rack has them (a STUT hold is not overwritten)
     if changed: call('vcvrack_set_module_state', {'id': m['id'], 'state': st})
 for f in quiet:
     rel = f.split('/crates/')[1]; dst = os.path.join(Q, rel.replace('/', os.sep)); os.makedirs(os.path.dirname(dst), exist_ok=True)

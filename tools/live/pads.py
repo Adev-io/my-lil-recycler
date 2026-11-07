@@ -244,12 +244,21 @@ def release(name):                                              # put a bank-2 m
     elif name == 'breakdown': fx.set_deck_filters(s[0], s[1]); fx.set_strip_map(s[2])
 def vox(note, name, hw):                                        # bank 3 vox pad press: hold on the song on show's own deck (fx.vox_on)
     with HOLDL: fx.vox_on(state, note, name, fx.own_deck(SP()), hw)
-    LOG.write(time.ctime() + f" fx {name} -> vox held {sorted((n, x[1]) for n, x in state['vox'].items())}\n")
+    LOG.write(time.ctime() + f" fx {name} -> vox held {sorted((n, x[1]) for n, x in list(state['vox'].items()))}\n")
 def vox_up(note):                                               # Launchpad note off on a held vox pad (never waits on busy)
     try:
         with HOLDL: fx.vox_off(state, note)
     except Exception: LOG.write(traceback.format_exc())         # off failed: still held, a press / clean tries again
-    LOG.write(time.ctime() + f" vox {note} up -> held {sorted((n, x[1]) for n, x in state['vox'].items())}\n"); paint()
+    LOG.write(time.ctime() + f" vox {note} up -> held {sorted((n, x[1]) for n, x in list(state['vox'].items()))}\n"); paint()
+CLEANL = threading.Lock()                                        # two quick cleans: one after the other
+def side(note, hw):                                             # vox holds + clean: own thread, past busy (never dropped), busy untouched
+    try:
+        name = MOVES()[note]
+        if name in fx.VOX_STUT: vox(note, name, hw)              # HOLDL serialises the writes
+        else:
+            with CLEANL: fx_act(name)
+    except Exception: LOG.write(traceback.format_exc())
+    paint()
 def synth_act(note, hw=False):                                  # a Synths pad: one action, a held fill, or an auto setting
     label, kind, arg = synths.pads(SP())[note]
     if kind in HOLD:
@@ -282,7 +291,7 @@ def let_go(note):                                               # Launchpad note
 def act(note, hw=False):
     try:
         importlib.reload(sections); importlib.reload(fx)            # not synths: a reload would swap ARP_LOCK and drop _open under running threads
-        if note in MOVES(): vox(note, MOVES()[note], hw) if MOVES()[note] in fx.VOX_STUT else fx_act(MOVES()[note])
+        if note in MOVES(): fx_act(MOVES()[note])                    # (vox holds + clean go through side(), never here)
         elif SYN(): synth_act(note, hw)
         else:
             rows, on = R(), ON(); b, i = pad(note); r = rows[b]
@@ -297,6 +306,8 @@ def act(note, hw=False):
 def press(note, hw=False):                                      # hardware pad (hw) or a click on the page (board.py): same path
     if not (pad(note) or note in MOVES() or (SYN() and note in synths.pads(SP()))): return False
     led(note, 3); led(note, 3, ch=1)
+    if MOVES().get(note) in fx.VOX_STUT or MOVES().get(note) == 'clean':   # a hold / its slide / the panic button: never dropped by busy
+        threading.Thread(target=side, args=(note, hw), daemon=True).start(); return True
     if state['busy']: return False
     state['busy'] = True; threading.Thread(target=act, args=(note, hw), daemon=True).start(); return True
 def on_msg(msg):
@@ -382,6 +393,9 @@ while not os.path.exists(STOP):
         t = time.time()
 try: inp and inp.close()
 except Exception: pass
+try:
+    with HOLDL: fx.vox_clean(state)                              # stopping: no vox stutter left held in Rack
+except Exception: LOG.write(traceback.format_exc())
 for n in range(11, 90): led(n, 0)
 with lock: o, out = out, None
 try: o and o.close()

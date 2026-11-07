@@ -192,7 +192,9 @@ finally:
             for i in row(name)['lit']:
                 if i not in keep: press(row(name)['base'] + i)
     except Exception as e: print('Synths let go failed', e)
-    for d, s in list(saved.items()) + list(saved_vs.items()): S.call('vcvrack_set_module_state', {'id': d, 'state': s})
+    for d, s in list(saved.items()) + list(saved_vs.items()):
+        if d in saved: s = dict(s, params=fx.no_stut(s['params']))       # Recycler decks: STUT 40-44 never restored (no hold left on)
+        S.call('vcvrack_set_module_state', {'id': d, 'state': s})
     for m, p in saved_p.items(): S.call('vcvrack_set_params', {'moduleId': m, 'params': [{'id': k, 'value': v} for k, v in p.items()]})
     fx.bpm(saved_bpm); time.sleep(1)
     post('/mode', {'mode': saved_mode}); bank(saved_bank); page(saved_page); time.sleep(6)

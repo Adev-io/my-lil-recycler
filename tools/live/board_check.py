@@ -180,7 +180,63 @@ try:                                                                            
     except RuntimeError: pass
     assert 12 in st['vox'] and fx.vox_lit(st) == {'vox 1/4'}, st                     # off failed: still held + lit, the next press / clean retries
     fx.vox_stut = lambda d, div: vs.append((d, div)); fx.vox_clean(st); assert st['vox'] == {} and vs[-1] == (A, None), vs
+    def fail_on(d, div):                                                         # record before write: the hold write fails ->
+        if div is not None: raise RuntimeError('no rig')
+        vs.append((d, div))
+    vs.clear(); fx.vox_stut = fail_on; st['down'].add(13)
+    try: fx.vox_on(st, 13, 'vox 1/8', A, True); raise AssertionError('vox_on swallowed the error')
+    except RuntimeError: pass
+    assert st['vox'] == {13: (A, 'vox 1/8', True)} and fx.vox_lit(st) == {'vox 1/8'}, st   # still recorded held + lit (safe to let go)
+    assert hw_off(13) and vs == [(A, None)] and st['vox'] == {}, vs                  # and its note off lets go
+    n_off = [0]
+    def flaky_off(d, div):
+        if div is None:
+            n_off[0] += 1
+            if n_off[0] == 1: raise RuntimeError('blip')
+        vs.append((d, div))
+    vs.clear(); fx.vox_stut = flaky_off; st['down'].discard(14); fx.vox_on(st, 14, 'vox 1/16', A, True)   # quick stab, first let go fails:
+    assert vs == [(A, 2), (A, None)] and st['vox'] == {} and n_off[0] == 2, vs      # one retry lets go
+    fx.vox_stut = lambda d, div: vs.append((d, div)) if d != B else (_ for _ in ()).throw(RuntimeError('deck B'))
+    vs.clear(); st['vox'].update({12: (A, 'vox 1/4', True), 14: (B, 'vox 1/16', True)})   # clean: deck B write fails, deck A still goes,
+    try: fx.vox_clean(st); raise AssertionError('vox_clean swallowed the error')       # the first error raised at the end
+    except RuntimeError: pass
+    assert vs == [(A, None)] and st['vox'] == {14: (B, 'vox 1/16', True)}, (vs, st)
+    st['vox'].clear()
+    assert fx.no_stut([{'id': i, 'value': 1.0} for i in (14, 39, 40, 43, 44, 45)]) == [{'id': 14, 'value': 1.0}, {'id': 39, 'value': 1.0}, {'id': 45, 'value': 1.0}]
 finally: S.call, fx.vox_stut = real_vox['call'], real_vox['vox_stut']
+try:                                                                             # sections.play writes slot paths as data only: no 'params'
+    got = []; rig_st = {'id': S.A, 'params': [{'id': 43, 'value': 0.0}], 'data': {'slots': [{'path': 'x'}] * 4}}
+    S.call = lambda name, args=None: (got.append((name, args)), json.dumps(rig_st))[1]
+    S.play(3, 'new.wav', 1.0, S.A); sets = [a for n, a in got if n == 'vcvrack_set_module_state']
+    assert len(sets) == 1 and 'params' not in sets[0]['state'] and sets[0]['state']['data']['slots'][3]['path'] == 'new.wav', sets
+finally: S.call = real_vox['call']
+import ast, types, threading                                                     # pads.py press / on_msg as written (pads.py itself opens the
+src = open(os.path.join(S.here, 'pads.py'), encoding='utf-8').read()             # Launchpad on import): those functions alone, rig + threads stubbed
+fns = [n for n in ast.parse(src).body if isinstance(n, ast.FunctionDef) and n.name in ('press', 'side', 'vox', 'vox_up', 'on_msg')]
+assert len(fns) == 5, [n.name for n in fns]
+class SyncThread:                                                                # a thread that runs on start(): the order is the test's
+    def __init__(s, target, args=(), daemon=None): s.t, s.a = target, args
+    def start(s): s.t(*s.a)
+done = []; bank_ = [fx.FX3]
+P = dict(state={'busy': True, 'vox': {}, 'down': set(), 'held': set()}, fx=fx, MOVES=lambda: bank_[0], SYN=lambda: False, SP=lambda: 0, pad=lambda n: None,
+         led=lambda *a, **k: None, paint=lambda: None, LOG=types.SimpleNamespace(write=lambda s: None), HOLDL=threading.RLock(), CLEANL=threading.Lock(),
+         threading=types.SimpleNamespace(Thread=SyncThread), traceback=__import__('traceback'), time=__import__('time'),
+         fx_act=lambda name: done.append(('fx_act', name)), act=lambda note, hw=False: done.append(('act', note)), let_go=lambda n: None)
+exec(compile(ast.Module(body=fns, type_ignores=[]), 'pads.py', 'exec'), P)
+msg = lambda t, n, v=100: types.SimpleNamespace(type=t, note=n, velocity=v)
+try:
+    vs = []; fx.vox_stut = lambda d, div: vs.append((d, div)); A = fx.own_deck(0)
+    P['on_msg'](msg('note_on', 12)); P['on_msg'](msg('note_on', 13))             # busy the whole time (another press in flight)
+    assert vs == [(A, 0), (A, 1)] and set(P['state']['vox']) == {12, 13}, vs        # second vox press while busy: NOT dropped
+    P['on_msg'](msg('note_off', 12)); P['on_msg'](msg('note_on', 13, 0))            # (a note_on at velocity 0 = note off)
+    assert vs == [(A, 0), (A, 1), (A, None)] and P['state']['vox'] == {} and not P['state']['down'], vs
+    assert P['press'](12) is True and P['press'](12) is True and vs[-2:] == [(A, 0), (A, None)], vs   # page clicks toggle past busy too
+    assert P['press'](11) is False and not done, done                             # other moves still wait on busy (drums in/out dropped)
+    bank_[0] = fx.FX; assert P['press'](18) is True and done == [('fx_act', 'clean')], done   # clean (bank 1 pad 18) never dropped by busy
+    assert P['state']['busy'] is True                                             # and leaves busy to the press that set it
+finally: fx.vox_stut = real_vox['vox_stut']
+print('Vox fixes offline: record before write (failed hold stays held + lit, its note off lets go), quick-stab let go retried once, clean per deck + first error raised,'
+      ' no_stut drops 40-44, sections.play state has no params, pads.press/on_msg: second vox press while busy not dropped, clean past busy, other moves still wait')
 print('Vox offline: FX3 12-15, one set_params call per hold / let go, slide = length only, first up keeps the second, latest up = back to the first length,'
       ' page turn releases the deck it started on, page 2 = deck B, quick stab, page click toggles, clean lets both decks go, failed off stays held')
 print('DnB offline: snapshot records the set tempo, release + clean return to it (128), a snapshot without bpm falls back to 120')

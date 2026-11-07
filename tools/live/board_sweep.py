@@ -35,7 +35,9 @@ def mark(): return len(open(LOGF, encoding='utf-8', errors='replace').readlines(
 def logged(n, text): return any(text in l for l in open(LOGF, encoding='utf-8', errors='replace').readlines()[n:])
 def snap(): return {m: prms(m) for m in NAMES}                                   # every param of the modules the console moves
 def put(sn):
-    for m, p in sn.items(): S.call('vcvrack_set_params', {'moduleId': m, 'params': [{'id': k, 'value': v} for k, v in p.items()]})
+    for m, p in sn.items():
+        ps = [{'id': k, 'value': v} for k, v in p.items()]
+        S.call('vcvrack_set_params', {'moduleId': m, 'params': fx.no_stut(ps) if m in (S.A, S.B, C) else ps})   # Recycler STUT 40-44 left alone
 def diff(a, b, skip=()):                                                         # params that differ, as 'MIX[4] 0.707->0.0'
     return [f'{NAMES[m]}[{k}] {round(a[m][k], 3)}->{round(b[m][k], 3)}' for m in a for k in a[m]
             if (m, k) not in skip and abs(a[m][k] - b[m][k]) > 0.002]
@@ -235,7 +237,9 @@ finally:
                 if b3 == 61 or i in (0, 1): press(b3 + i)                        # auto change pads 3-4 = phrase length, lit by design
     except Exception as e: print('Synths let go failed', e)
     post('/mode', {'mode': saved_mode}); bank(saved_bank); page(saved_page); time.sleep(2)   # page turn first: the arp scale write settles
-    for d, s in saved.items(): S.call('vcvrack_set_module_state', {'id': d, 'state': s})
+    for d, s in saved.items():
+        if d in (S.A, S.B, C): s = dict(s, params=fx.no_stut(s['params']))   # Recycler decks: STUT 40-44 never restored (no hold left on)
+        S.call('vcvrack_set_module_state', {'id': d, 'state': s})
     for m, p in saved_p.items(): S.call('vcvrack_set_params', {'moduleId': m, 'params': [{'id': k, 'value': v} for k, v in p.items()]})
     fx.set_strips(saved_strips); fx.bpm(saved_bpm)
     if saved_level is not None: open(LEVELF, 'w').write(saved_level)

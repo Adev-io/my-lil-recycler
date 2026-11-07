@@ -44,6 +44,7 @@ def set_slots(mid, crate, loop, override, pat):
         p = crate.replace('\\', '/') + '/' + min(c, key=lambda f: abs(int(re.search(r'-(\d\d)', f).group(1)) - loop))
         p = override.get(k, p)
         if s['path'] != p: s['path'] = p; changed = True
+    st.pop('params', None)                                                       # data only: params stay as Rack has them (STUT holds)
     if changed: call('vcvrack_set_module_state', {'id': mid, 'state': st})     # lands at the next loop start
 def apply(i):
     S = SECTIONS[i]
@@ -124,7 +125,8 @@ def play(slot, path, level, deck=None):                        # path None = mut
     if path:
         st = json.loads(call('vcvrack_get_module_state', {'id': deck}))
         if st['data']['slots'][slot]['path'] != path:
-            st['data']['slots'][slot]['path'] = path; call('vcvrack_set_module_state', {'id': deck, 'state': st})
+            st['data']['slots'][slot]['path'] = path; st.pop('params', None)   # data only: a STUT press between the get and the set stays
+            call('vcvrack_set_module_state', {'id': deck, 'state': st})
     call('vcvrack_set_params', {'moduleId': deck, 'params': [{'id': 14 + slot, 'value': level if path else 0.0}]})
 def now(rows=None):                                            # row -> index of the sample playing (None = muted), read from the rig
     out = {}

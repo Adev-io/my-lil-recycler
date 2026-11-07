@@ -16,6 +16,7 @@ for s in st['data']['slots']:
     stem = re.match(r'\d-(\w+)-', os.path.basename(s['path'])).group(1)
     c = [f for f in files if re.match(rf'\d-{stem}-\d\d', f)]
     s['path'] = CR.replace('\\', '/') + '/' + min(c, key=lambda f: abs(int(re.search(r'-(\d\d)-', f).group(1)) - loop))
+st.pop('params', None)                                  # data only: params stay as Rack has them (a STUT hold is not overwritten)
 call('vcvrack_set_module_state', {'id': A, 'state': st})
 call('vcvrack_set_params', {'moduleId': ACID, 'params': [{'id': 24, 'value': pat}]})
 call('vcvrack_set_params', {'moduleId': A, 'params': [{'id': 14, 'value': bass}]})
