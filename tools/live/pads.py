@@ -14,7 +14,7 @@ state = {'on': [{} for _ in sections.PAGES], 'page': 0, 'busy': False, 'fx': set
 HUSH = {'drums only': (1, 2, 3, 5, 6), 'no drums': (0, 4)}       # Mixer strips each move silences: drums only = Acid, decks A/B,
                                                                  # Acid Voice, Triple; no drums = My lil Drums + the drum stem
 lp = lambda names, pre: next((x for x in names if x.startswith(pre)), None)        # Launchpad unplugged -> page only
-out = lp(mido.get_output_names(), 'MIDIOUT2 (LPMiniMK3)'); out = out and mido.open_output(out); state['hw'] = bool(out)
+out = lp(mido.get_output_names(), 'MIDIOUT2 (LPMiniMK3'); out = out and mido.open_output(out); state['hw'] = bool(out)
 lock = threading.Lock()
 def led(note, vel, ch=0):
     if out:
