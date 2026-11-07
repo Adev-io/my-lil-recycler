@@ -13,7 +13,7 @@ LOG = open(os.path.join(here, 'pads.log'), 'a', buffering=1); sys.stderr = LOG
 import sections, fx, synths
 STOP = os.path.join(here, 'pads.stop')
 state = {'on': [{} for _ in sections.PAGES], 'page': 0, 'busy': False, 'fx': set(), 'gen': 0, 'dgen': 0, 'snap': None, 'hw': False, 'swept': [], 'tgen': 0, 'hush': {}, 'bank': 0, 'saved': {}, 'agen': 0, 'machine': True, 'fgen': 0, 'fading': False, 'acts': 0,
-         'song': 0, 'held': set(), 'auto': set(), 'phrase': 8, 'egen': 0, 'slit': set(), 'down': set()}
+         'song': 0, 'held': set(), 'auto': set(), 'phrase': 8, 'egen': {}, 'edir': {}, 'slit': set(), 'down': set()}   # egen / edir: per entry move (acid, arp)
 HUSH = {'drums only': (1, 2, 3, 5, 6), 'no drums': (0, 4)}       # Mixer strips each move silences: drums only = Acid, decks A/B,
                                                                  # Acid Voice, Triple; no drums = My lil Drums + the drum stem
 lp = lambda names, pre: next((x for x in names if x.startswith(pre)), None)        # Launchpad unplugged -> page only
@@ -40,6 +40,7 @@ ON = lambda: state['on'][state['page']]                          # row -> playin
 SYN = lambda: bool(sections.PAGES[state['page']].get('synth'))    # the Synths page on show
 SP = lambda: state['song']                                        # the song the moves act on: the song page last shown
 HOLD = ('fill', 'roll', 'octjump')                                # Synths pads that act while held (a page click toggles)
+HOLDL = threading.RLock()                                        # hold on / let go one at a time (RLock: synth_act calls let_go)
 ARROWS = {93: -1, 94: 1}                                         # top row: left / right arrow (programmer mode CC)
 MACHINE_CC = 29                                                  # right column, round button at the end of the drums row
 def machine():                                                  # My lil Drums on / off, apart from the tracked drums (stem row)
@@ -156,7 +157,22 @@ def fx_act(name):
         threading.Thread(target=run, daemon=True).start()
     elif name in fx.STRIP_TOGGLE:                                  # in / out; lit = in. Out remembers the level, in puts it back
         k, dflt = fx.STRIP_TOGGLE[name]; cur = fx.strips()[k]
-        if cur > 0.001: state['saved'][name] = cur; fx.set_strip_map({k: 0.0}); state['fx'].discard(name)
+        if name in synths.ENTRY:                                   # acid / arp come in and go out melodically over 2 bars (synths.ENTRY)
+            g = state['egen'][name] = state['egen'].get(name, 0) + 1; alive = lambda: state['egen'][name] == g   # per voice: only a newer
+            go_in, go_out = synths.ENTRY[name]                     # press of this move cancels it; the cancelled run hands the knob over
+            was = state['edir'].get(name)                          # a run still in flight: this press reverses it (during an out ramp
+            out_ = was == 'in' if was else cur > 0.001             # the strip is still up, so the strip alone would say "out" again)
+            def run(fn, *a):
+                try: fn(*a)
+                except Exception: LOG.write(traceback.format_exc())
+                finally:
+                    if state['egen'][name] == g: state['edir'].pop(name, None)   # a cancelled run leaves the newer run's direction alone
+            state['edir'][name] = 'out' if out_ else 'in'
+            if out_:
+                if cur > 0.001: state['saved'][name] = cur
+                state['fx'].discard(name); threading.Thread(target=run, args=(go_out, alive), daemon=True).start()
+            else: state['fx'].add(name); threading.Thread(target=run, args=(go_in, state['saved'].get(name, dflt), alive), daemon=True).start()
+        elif cur > 0.001: state['saved'][name] = cur; fx.set_strip_map({k: 0.0}); state['fx'].discard(name)
         else: fx.set_strip_map({k: state['saved'].get(name, dflt)}); state['fx'].add(name)
     elif name == 'acid sweep':                                    # Acid cutoff up over SWEEP_SECS; press again = snap back
         state['agen'] += 1; g = state['agen']
@@ -218,10 +234,11 @@ def release(name):                                              # put a bank-2 m
 def synth_act(note, hw=False):                                  # a Synths pad: one action, a held fill, or an auto setting
     label, kind, arg = synths.pads(SP())[note]
     if kind in HOLD:
-        if note in state['held']: return let_go(note)            # second click on the page = let go
-        s = synths.hold(kind, arg, True); state['saved'][note] = s
-        state['held'].add(note)                                  # after the on: a release before this line finds nothing held ...
-        if hw and note not in state['down']: return let_go(note) # ... and is caught here (quick stab: the pad is already up)
+        with HOLDL:                                              # a legato slide's let_go waits until this pad is in held
+            if note in state['held']: return let_go(note)        # second click on the page = let go
+            s = synths.hold(kind, arg, True); state['saved'][note] = s
+            state['held'].add(note)                              # after the on: a release before this line finds nothing held ...
+            if hw and note not in state['down']: return let_go(note)   # ... and is caught here (quick stab: the pad is already up)
     elif kind == 'auto': state['auto'] ^= {arg}
     elif kind == 'phrase': state['phrase'] = arg
     else: synths.do(kind, arg)
@@ -229,16 +246,17 @@ def synth_act(note, hw=False):                                  # a Synths pad: 
     except Exception: LOG.write(traceback.format_exc())
     LOG.write(time.ctime() + f" synths {label} held {sorted(state['held'])} auto {sorted(state['auto'])} phrase {state['phrase']}\n")
 def let_go(note):                                               # Launchpad note off on a held pad, or its second click
-    try: state['held'].remove(note)                              # atomic claim: two let_go calls for one hold, only one acts
-    except KeyError: return
-    s = state['saved'].pop(note, None)
-    try:
-        P = synths.pads(SP()); label, kind, arg = P[note]
-        same = [n for n in sorted(state['held']) if P[n][1] == kind]   # another held pad on the same hold button (slide between fills)
-        if not same: synths.hold(kind, arg, False, s)            # the last one off lets go (octjump: puts the octave back)
-        elif kind != 'octjump': synths.hold(kind, P[same[-1]][2], True)   # the one still held keeps going
-    except Exception:                                            # off failed: still held, the next press or release tries again
-        LOG.write(traceback.format_exc()); state['saved'][note] = s; state['held'].add(note); paint(); return
+    with HOLDL:                                                  # one hold change at a time: a slide's off never lands after the next pad's on
+        try: state['held'].remove(note)                          # atomic claim: two let_go calls for one hold, only one acts
+        except KeyError: return
+        s = state['saved'].pop(note, None)
+        try:
+            P = synths.pads(SP()); label, kind, arg = P[note]
+            same = [n for n in sorted(state['held']) if P[n][1] == kind]   # another held pad on the same hold button (slide between fills)
+            if not same: synths.hold(kind, arg, False, s)        # the last one off lets go (octjump: puts the octave back)
+            elif kind != 'octjump': synths.hold(kind, P[same[-1]][2], True)   # the one still held keeps going
+        except Exception:                                        # off failed: still held, the next press or release tries again
+            LOG.write(traceback.format_exc()); state['saved'][note] = s; state['held'].add(note); paint(); return
     try: state['slit'] = synths.lit(state)                       # octjump puts the octave back: its oct pad lights again
     except Exception: LOG.write(traceback.format_exc())
     LOG.write(time.ctime() + f" synths {label} let go" + (f", {P[same[-1]][0]} still held" if same else '') + '\n'); paint()
@@ -282,6 +300,19 @@ def _scale():
 threading.Thread(target=_scale, daemon=True).start()           # the arp's keys follow the page on show (own thread: a slow arp must not hold startup)
 try: inp = lp(mido.get_input_names(), 'LPMiniMK3 MIDI'); inp = inp and mido.open_input(inp, callback=on_msg)
 except Exception as e: inp = None; LOG.write(time.ctime() + f' launchpad input open failed: {e}; the 5 s refresh retries\n')
+def auto_loop():                                                # phrase auto-change: one small move per phrase per enabled voice
+    while not os.path.exists(STOP):                             # (roughly bar-aligned: the Acid takes a pattern at its pattern end,
+        t0 = time.time()                                        # the arp a change on its next step)
+        try: secs = fx.bars_secs(state['phrase'])
+        except Exception: secs = 16.0
+        while time.time() - t0 < secs and not os.path.exists(STOP): time.sleep(0.25)
+        if state['auto'] and not state['held'] and not state['busy'] and 'dnb' not in state['fx']:
+            try:
+                did = synths.auto_step(SP(), set(state['auto']))
+                LOG.write(time.ctime() + ' auto ' + ', '.join(did) + '\n')
+                if SYN(): state['slit'] = synths.lit(state); paint()
+            except Exception: LOG.write(traceback.format_exc())
+threading.Thread(target=auto_loop, daemon=True).start()
 import board; board.start(press, state, turn, minilab, flip, machine)
 LOG.write(time.ctime() + f" start rows {state['on']} fx row {list(fx.FX.values())} launchpad {'on' if out else 'missing: page only'}"
           f" page http://127.0.0.1:{board.PORT}\n")
@@ -319,6 +350,7 @@ while not os.path.exists(STOP):
             state['machine'] = next(x['value'] for x in sections.json.loads(sections.call('vcvrack_get_params', {'moduleId': sections.DRUMS})) if x['id'] == 5) > 0.001
             cur = fx.strips()                                    # in/out moves lit by what the strips really are
             for name, (k, _) in list(fx.STRIP_TOGGLE.items()) + ([('drums in/out', (4, 0))] if not state['fading'] else []):
+                if name in state['edir']: continue               # an entry still ramping: its press set the light (an out keeps the strip up)
                 state['fx'] = (state['fx'] | {name}) if cur[k] > 0.001 else (state['fx'] - {name})
             if SYN(): state['slit'] = synths.lit(state)              # Synths page: lit by what the arp + acid really are (MiniLab, Rack)
         except Exception: LOG.write(traceback.format_exc())
