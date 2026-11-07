@@ -18,8 +18,10 @@ def reverse(on, decks=None):          # music decks only (reversed drums lose th
     for deck in (decks or (S.A, S.B, S.D)): S.call('vcvrack_set_params', {'moduleId': deck, 'params': [{'id': 36 + k, 'value': 1.0 if on else 0.0} for k in range(4)]})
 def strip(k, on):                      # Mixer strip k (2 = deck A music, 3 = deck B music, 4 = deck C drums, 7 = deck D music): unity or silent
     S.call('vcvrack_set_params', {'moduleId': S.MIX, 'params': [{'id': k, 'value': S.U if on else 0.0}]})
-def clean():
-    set_filters(BASE); set_deck_filters(S.D, BASEF[S.D]); reverse(False); strip(2, True); strip(3, True); strip(4, True)   # deck D's strip: left as is (rests at 0)
+def clean(song=None):                  # song: the song playing (pads.py PLAY). A strip that rests at 0 (deck D) opens if its song plays, else
+    set_filters(BASE); set_deck_filters(S.D, BASEF[S.D]); reverse(False); strip(2, True); strip(3, True); strip(4, True)   # back to rest: a transition
+    if song is None: return                                         # cut off mid-fade leaves no strip part-open. None: deck D's strip left as is
+    S.call('vcvrack_set_params', {'moduleId': S.MIX, 'params': [{'id': STRIP[d], 'value': S.U if own_deck(song) == d else r} for d, r in REST.items()]})
 
 # Per song (2026-11-06, Ari: "sweep is only for samples ... a sweep up and down for each [song]" + "a transition from one song
 # to another"). A song = its own deck (page 1 Lowdown = A, page 2 Time Out Of Mind = B, page 3 Disco Ulysses = D, sections.PAGES
@@ -51,7 +53,8 @@ def transition(page, on, alive):   # the songs not on show sweep up + fade out; 
         for b in FIRST:
             r = rows[b]; S.play(r['slot'], r['samples'][0], r['level'], r.get('deck')); on[page][b] = 0
         S.call('vcvrack_set_params', {'moduleId': S.MIX, 'params': [{'id': STRIP[own], 'value': 0.0}]}); mix[STRIP[own]] = 0.0
-    inn = song_decks(page, on); out = list(dict.fromkeys(d for k in others for d in song_decks(k, on) if d not in inn))
+    inn = song_decks(page, on)                                     # out: decks heard now; one at strip 0 (a Disco cue) keeps its slots + lit pads
+    out = list(dict.fromkeys(d for k in others for d in song_decks(k, on) if d not in inn and mix[STRIP[d]] > 0.001))
     f0 = {d: deck_filters(d) for d in inn + out}; t0 = time.time()
     while True:
         if not alive(): return False

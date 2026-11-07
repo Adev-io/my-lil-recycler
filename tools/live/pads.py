@@ -190,6 +190,8 @@ def fx_act(name):
         else:
             snap = fx.dnb_arm(state); state['fx'].add(name)
             threading.Thread(target=fx.dnb_on, args=(snap, alive), daemon=True).start()
+    elif name == 'transition' and state['fx'] & {'drums only', 'dnb'}:   # their release puts back the strips they saved (HUSH / dnb snapshot),
+        LOG.write(time.ctime() + f" transition ignored: {sorted(state['fx'] & {'drums only', 'dnb'})} held\n")   # which would undo strip 8
     elif name == 'transition':                                    # hand over to the song on show over 8 bars; runs once, blinks while it runs
         if name in state['fx']: return
         state['tgen'] += 1; g = state['tgen']; state['fx'].add(name); to = SP()   # the song pressed for, whatever page is on show when it ends
@@ -275,7 +277,7 @@ def fx_act(name):
         state['gen'] += 1; state['tgen'] += 1
         if 'dnb' in state['fx']: state['dgen'] += 1; fx.restore(state['snap']); state['snap'] = None   # snap back to the tempo from before, strips + drum pattern as before
         for n in list(state['hush']): fx.set_strip_map(state['hush'].pop(n))
-        fx.clean(); state['fx'] = set()
+        fx.clean(PLAY()); state['fx'] = set()                     # after the hush / dnb restores: a cut-off transition's strip 8 settles too
     LOG.write(time.ctime() + f" fx {name} -> {sorted(state['fx'])}\n")
 def release(name):                                              # put a bank-2 move back the way it found things
     s = state['saved'].pop(name, None); state['fx'].discard(name)

@@ -467,6 +467,9 @@ try:
     Q3['turn'](-1); Q3['turn'](-1); assert st3['page'] == 0 and st3['song'] == 2 and arp['lockedMask'] == 3418   # back on the Lowdown page: Disco still playing
     fx3.transition = lambda pg, on, alive: trans.append(pg) and False; Q3['fx_act']('transition')   # cut off (clean): the song playing stays
     assert trans == [2, 0] and st3['song'] == 2 and arp['lockedMask'] == 3418 and maps.page_now() == 2
+    for held in ('drums only', 'dnb'):                                          # their release restores saved strips (strip 8 too): transition ignored
+        st3['fx'] = {held}; Q3['fx_act']('transition'); assert trans == [2, 0] and st3['fx'] == {held}, (held, trans, st3['fx'])
+    st3['fx'] = set()
 finally: maps.PAGEF, synths.S.call = real_pagef, real_call3; shutil.rmtree(tmpp, ignore_errors=True)
 Q2['playing'] = lambda p: st2.__setitem__('song', p); real_strips = fx.strips    # a song pad pressed while no other song is heard: that song plays
 try:
@@ -477,6 +480,19 @@ try:
     st2['page'] = 2; Q2['act'](71); assert st2['song'] == 1                      # TOOM heard: a Disco cue changes nothing
     assert not [l for l in logs if 'Traceback' in l], logs
 finally: S.play, fx.strips = real_play, real_strips
+try:                                                                            # transition: an out deck already at strip 0 (a Disco cue) is left alone
+    rig = Rig(); S.call = rig; fx.TRANS_SECS, fx.STEP = 0.05, 0.005
+    rig.path[S.A][1] = K['samples'][0]; rig.p[S.A][15] = K['level']; rig.p[S.MIX].update({2: U, 3: U, 4: U, 7: 0.0})   # Lowdown keys heard
+    rig.path[S.D][1] = RD[71]['samples'][0]; rig.p[S.D][15] = 1.0; on = [{71: 0}, {}, {71: 0}, {}]                  # Disco piano cued at strip 0
+    rig.sets.clear(); assert fx.transition(1, on, lambda: True) is True                                             # Lowdown -> TOOM
+    assert rig.p[S.D][15] == 1.0 and on[2] == {71: 0} and rig.p[S.MIX][7] == 0.0 and all(rig.p[S.A][14 + k] == 0.0 for k in range(4)), (rig.p[S.D][15], on)
+    assert not any(a['moduleId'] == S.D for a in rig.sets) and not any(x['id'] == 7 for a in rig.sets if a['moduleId'] == S.MIX for x in a['params']), 'deck D untouched'
+    rig.p[S.MIX][7] = 0.4; fx.clean(0); assert rig.p[S.MIX][7] == 0.0 and [rig.p[S.MIX][k] for k in (2, 3, 4)] == [U, U, U]   # clean, Lowdown playing:
+    rig.p[S.MIX][7] = 0.4; fx.clean(2); assert rig.p[S.MIX][7] == U                                               # a half-faded strip 8 back to 0; Disco playing: open
+    rig.p[S.MIX][7] = 0.4; fx.clean(); assert rig.p[S.MIX][7] == 0.4                                              # no song given: left as is
+finally: S.call, fx.TRANS_SECS, fx.STEP = real_t['call'], real_t['TRANS_SECS'], real_t['STEP']
+print('Reviewer fixes offline: transition ignored while drums only / dnb held; transition leaves an out deck at strip 0 (Disco cue: slots, lit pads, strip 8);'
+      ' clean settles strip 8: 0 unless Disco is the song playing, then unity')
 print('Song playing offline: heard / playing (loudest, tie -> page on show, cued Disco at strip 0 not heard), Lowdown playing -> pages TOOM, Disco, Synths:'
       ' scale 2774, Lowdown acid set, mix map deck A; transition to Disco -> 3418, deck D, page.txt 2; page turns back keep it; cut-off transition keeps it;'
       ' first song pad with no other song heard sets it, a cue over a heard song does not')
