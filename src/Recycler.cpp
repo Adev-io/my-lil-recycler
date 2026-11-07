@@ -20,6 +20,7 @@
 #include "Library.h"
 #include "Picker.h"
 #include "Shape.h"
+#include "Stutter.h"
 #include "Stretch.h"
 #include "Transport.h"
 #include "Deck.h"
@@ -144,6 +145,7 @@ struct Stem
     bool rev = false, oldRev = false, jumpRev = false;    // the direction each head steps in
     float filt = 0.f;                                     // FILTER knob, smoothed (~10 ms)
     rc::shape::Svf svf;
+    rc::stut::Stutter stut;                               // STUT: the held slice repeat
 };
 
 struct Recycler : Module
@@ -151,6 +153,7 @@ struct Recycler : Module
     enum ParamId { FOLDER_PARAM, BPM_PARAM, ROOT_PARAM, MODE_PARAM, BARS_PARAM, RUN_PARAM, ENUMS (ROLL_PARAM, 4), ENUMS (LOCK_PARAM, 4),
                    ENUMS (LEVEL_PARAM, 4), BATCH_PARAM, CHAOS_PARAM,
                    ENUMS (PITCH_PARAM, 4), ENUMS (FILTER_PARAM, 4), ENUMS (PAN_PARAM, 4), ENUMS (START_PARAM, 4), ENUMS (REV_PARAM, 4),
+                   ENUMS (STUT_PARAM, 4), STUTLEN_PARAM,
                    PARAMS_LEN };   // new params only ever go at the end: Rack saves params by id
     enum InputId { CLOCK_INPUT, VOCT_INPUT, RESET_INPUT, RUN_INPUT, ENUMS (ROLL_INPUT, 4), BATCH_INPUT, CHAOS_INPUT, INPUTS_LEN };
     enum OutputId { ENUMS (OUT_L_OUTPUT, 4), ENUMS (OUT_R_OUTPUT, 4), MIX_L_OUTPUT, MIX_R_OUTPUT, OUTPUTS_LEN };
@@ -247,7 +250,10 @@ struct Recycler : Module
             configOutput (OUT_R_OUTPUT + i, r + " right");
             configLight (LOCK_LIGHT + i, r + " locked");
             paramQuantities[LOCK_PARAM + i]->randomizeEnabled = false;
+            configButton (STUT_PARAM + i, r + " stutter (hold)");
         }
+        configSwitch (STUTLEN_PARAM, 0.f, 3.f, 1.f, "Stutter length", { "1/4 bar", "1/8 bar", "1/16 bar", "1/32 bar" });
+        paramQuantities[STUTLEN_PARAM]->randomizeEnabled = false;
         configButton (BATCH_PARAM, "Batch: re-roll every unlocked stem");
         configParam (CHAOS_PARAM, 0.f, 1.f, 0.25f, "Chaos (looser tempo and key fit, wilder picks)", "%", 0.f, 100.f);
         configInput (CLOCK_INPUT, "Clock (quarter-note pulses; overrides BPM)");
@@ -1049,6 +1055,18 @@ struct Recycler : Module
         st.jumpLeft = 0;   // cur changes: its pre-jump head means nothing now
     }
 
+    // declick a phase jump on cur from the head that read lastIdx last sample; landing mid-declick, keep whichever head
+    // is louder now
+    static void startJump (Stem& st, int len)
+    {
+        if (st.jumpLeft == 0 || 2 * st.jumpLeft < st.jumpLen)
+        {
+            st.jumpPos = rc::shape::stepIndex (st.lastIdx, st.cur->a.frames(), st.rev);
+            st.jumpRev = st.rev;
+        }
+        st.jumpLeft = st.jumpLen = std::max (1, len);
+    }
+
     // frame of b at loop phase: b holds b->bars bars of a loopBars-bar loop, so it plays at its own speed and repeats
     static size_t frameAt (const Buf* b, double phase, double loopBars)
     {
@@ -1120,6 +1138,8 @@ struct Recycler : Module
         const float step = 1.f / (0.005f * sr);   // 5 ms run / stop ramp
         runGain = running ? std::min (1.f, runGain + step) : std::max (0.f, runGain - step);
         const int fadeSwap = (int) (0.02f * sr), fadeJump = (int) (0.005f * sr);
+        const size_t fadeStut = (size_t) (0.003f * sr);   // STUT seam fade
+        const int stutLen = clamp ((int) std::round (params[STUTLEN_PARAM].getValue()), 0, 3);
         const float filtCoef = 1.f - std::exp (-1.f / (0.01f * sr));   // ~10 ms knob smoothing
         const double loopBars = BAR_COUNTS[barsIndex()];
         const uint32_t drop = dropMask.load (std::memory_order_relaxed);
@@ -1139,6 +1159,7 @@ struct Recycler : Module
             {
                 if (st.cur) fadeOut (st, st.cur, fadeSwap);
                 st.cur = nullptr;
+                st.stut.recapture();
                 landedId[i].store (0, std::memory_order_relaxed);
                 dropMask.fetch_and (~(1u << i));
             }
@@ -1147,29 +1168,26 @@ struct Recycler : Module
                 Buf* next = pending[i].exchange (nullptr);
                 fadeOut (st, st.cur, fadeSwap);   // no cur: fade in from silence
                 st.cur = next;
+                st.stut.recapture();   // a held STUT follows the new buffer from its own grid point
                 if (st.cur) landed[i].store (st.cur->gen, std::memory_order_relaxed);
                 landedId[i].store (st.cur ? st.cur->id : 0, std::memory_order_relaxed);
             }
             else if ((jumped || shapeJump) && st.cur && st.cur->a.frames())
-            {
-                // declick the jump (RESET, START or REV); landing mid-declick, keep whichever head is louder now
-                if (st.jumpLeft == 0 || 2 * st.jumpLeft < st.jumpLen)
-                {
-                    st.jumpPos = rc::shape::stepIndex (st.lastIdx, st.cur->a.frames(), st.rev);
-                    st.jumpRev = st.rev;
-                }
-                st.jumpLeft = st.jumpLen = std::max (1, fadeJump);
-            }
+                startJump (st, fadeJump);   // RESET, START or REV
             st.start = startNow;
             st.rev = revNow;
 
-            float l = 0.f, r = 0.f;
+            float l = 0.f, r = 0.f, sg = st.stut.gain();
             if (st.cur && st.cur->a.frames())
             {
                 const Stereo& c = st.cur->a;
                 const size_t fwd = frameAt (st.cur, phase, loopBars);
-                const size_t idx = rc::shape::readIndex (fwd, c.frames(), st.start, st.rev);
-                pubHead[i].store ((float) fwd / (float) c.frames(), std::memory_order_relaxed);
+                // STUT: the slice grid is the buffer's own bars (it may lag BARS until its re-render lands)
+                const size_t slices = (size_t) std::max (1, st.cur->bars) * (size_t) rc::stut::DIVS[stutLen];
+                const size_t at = st.stut.step (fwd, c.frames(), slices, params[STUT_PARAM + i].getValue() > 0.5f, fadeStut, sg);
+                if (st.stut.jumped()) startJump (st, fadeJump);   // release / length change: declick like a jump
+                const size_t idx = rc::shape::readIndex (at, c.frames(), st.start, st.rev);
+                pubHead[i].store ((float) at / (float) c.frames(), std::memory_order_relaxed);   // the display shows the repeat
                 l = c.l[idx];
                 r = c.r[idx];
                 st.lastIdx = idx;
@@ -1198,6 +1216,8 @@ struct Recycler : Module
                 r = r * gIn + orr * gOut;
                 --st.fadeLeft;
             }
+            l *= sg;   // STUT seam fade (1 when not stuttering); on the swap's old head too, so a swap mid-seam has no step
+            r *= sg;
 
             if (! st.cur && st.fadeLeft == 0 && st.svf.quiet()) st.svf.reset();   // silent, tail decayed: the next stem starts clean
             st.filt += (params[FILTER_PARAM + i].getValue() - st.filt) * filtCoef;
@@ -1338,6 +1358,7 @@ struct Recycler : Module
         if (flag (root, "deck", b)) deckJson = b;
         deck = deckJson;   // patches from 2.0.0 have no key: off
         for (int i = 0; i < 4; ++i) deckSteps[i].store (0);   // presses counted before a load never apply after it
+        for (int i = 0; i < 4; ++i) params[STUT_PARAM + i].setValue (0.f);   // a STUT hold never survives a reload
         if (deckJson) for (int i = 0; i < 4; ++i) params[LOCK_PARAM + i].setValue (0.f);   // a deck patch never fires a previous step
         if (number (root, "bpm", v)) params[BPM_PARAM].setValue ((float) clampD (v, 40.0, 240.0));
         if (number (root, "root", v)) params[ROOT_PARAM].setValue ((float) std::round (clampD (v, 0.0, 11.0)));
@@ -1805,8 +1826,10 @@ struct RecyclerWidget : ModuleWidget
         addInput (createInputCentered<PJ301MPort> (at (L::VOCT_INPUT), module, Recycler::VOCT_INPUT));
         addInput (createInputCentered<PJ301MPort> (at (L::RESET_INPUT), module, Recycler::RESET_INPUT));
         addInput (createInputCentered<PJ301MPort> (at (L::RUN_INPUT), module, Recycler::RUN_INPUT));
+        addParam (createParamCentered<RoundSmallBlackKnob> (at (L::STUTLEN_PARAM), module, Recycler::STUTLEN_PARAM));   // snaps (a switch)
         for (int i = 0; i < 4; ++i)
         {
+            addParam (createParamCentered<VCVButton> (at (L::STUT_PARAM[i]), module, Recycler::STUT_PARAM + i));
             addParam (createParamCentered<VCVButton> (at (L::ROLL_PARAM[i]), module, Recycler::ROLL_PARAM + i));
             addParam (createParamCentered<VCVLatch> (at (L::LOCK_PARAM[i]), module, Recycler::LOCK_PARAM + i));
             addChild (createLightCentered<SmallLight<LimeLight>> (at (L::LOCK_LIGHT[i]), module, Recycler::LOCK_LIGHT + i));

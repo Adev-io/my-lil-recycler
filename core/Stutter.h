@@ -55,6 +55,7 @@ struct Stutter
     void recapture() { fresh = true; }        // the slot's buffer changed: the next held sample takes the timeline again
     bool active() const { return on; }        // repeating a slice
     bool jumped() const { return jump; }      // the last step left the timeline's read (release, length change)
+    float gain() const { return g; }          // the last gain (held while the slot has no buffer to step)
 
 private:
     void capture (size_t fwd, size_t frames, size_t slices)
