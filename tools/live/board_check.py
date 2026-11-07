@@ -411,7 +411,7 @@ class Clock:                                                                  # 
 class Rig:                                                                    # decks / Mixer as params + slot paths, the clock, the arp's data; S.call answers from it
     def __init__(s):
         s.p = {m: {i: 0.0 for i in range(48)} for m in (S.A, S.B, fx.C, S.D, S.MIX)}; s.path = {m: [''] * 4 for m in s.p}; s.sets = []
-        s.clk, s.arp, s.log, s.fail = Clock(), {'locked': True, 'lockedMask': 2774}, [], None; s.p[fx.CLOCK] = {0: 128.0}   # log: (time, module, writes)
+        s.clk, s.arp, s.log, s.fail, s.reads = Clock(), {'locked': True, 'lockedMask': 2774}, [], None, []; s.p[fx.CLOCK] = {0: 128.0}   # log: (time, module, writes)
     def __call__(s, name, a=None):
         if name == 'vcvrack_get_voltages': return json.dumps([{'id': fx.CLOCK, 'outputs': [{'id': 0, 'voltages': [s.clk.gate()]}]}])
         if name == 'vcvrack_get_params': return json.dumps([{'id': i, 'value': v} for i, v in s.p[a['moduleId']].items()])
@@ -421,6 +421,7 @@ class Rig:                                                                    # 
             for x in a['params']: s.p[a['moduleId']][x['id']] = x['value']
             return '[]'
         if name == 'vcvrack_get_module_state':
+            s.reads.append((s.clk.t, a['id']))
             if a['id'] == synths.ARP: return json.dumps({'id': synths.ARP, 'data': dict(s.arp)})
             return json.dumps({'params': [{'id': i, 'value': v} for i, v in s.p[a['id']].items()], 'data': {'slots': [{'path': x} for x in s.path[a['id']]]}})
         if name == 'vcvrack_set_module_state':
@@ -624,7 +625,26 @@ try:
     rig, on, t0 = fresh(1); real_ss = synths.set_scale; synths.set_scale = lambda pg: (_ for _ in ()).throw(RuntimeError('arp'))
     try: assert fx.transition(2, on, lambda: True, song=1) is True and rows_in(rig, 2)
     finally: synths.set_scale = real_ss
+    # follow-ups: the air only writes (deck C's state read a bar ahead), a slot already on its path is left alone, a failed load at blend
+    # bar 1 reopens the strips it took down, first-half rows on a deck that keeps its strip ramp on slot level in small steps
+    rig, on, t0 = fresh(1); t_air = t0 + 3 * BAR + 3 * BEAT; rig.path[S.D][1] = RD[71]['samples'][0]
+    assert fx.transition(2, on, lambda: True, song=1) is True and rows_in(rig, 2)
+    cr = [t for t, m in rig.reads if m == fx.C]; assert cr and not [t for t in cr if t >= t_air - 1e-9] and abs(cr[-1] - (t0 + 3 * BAR)) <= fx.POLL, ('C read a bar ahead', cr, t_air)
+    assert '' not in [p for t, p in paths(rig, S.D, 1)] and '' in [p for t, p in paths(rig, S.D, 0)], 'Disco piano already on its path: not emptied; bass swapped'
+    rig, on, t0 = fresh(0); rig.fail = lambda a: a['moduleId'] == S.B and 14 in [x['id'] for x in a['params']]
+    try: fx.transition(1, on, lambda: True, song=0); raise AssertionError('no error')
+    except RuntimeError: pass
+    assert rig.p[S.MIX][3] == U and [w for t, m, w in rig.log if m == S.MIX] == [{3: 0.0}, {3: U}], [w for t, m, w in rig.log if m == S.MIX]
+    br0 = fx.BLEND_ROWS; fx.BLEND_ROWS = ((41, 71), (81,))                      # TOOM piano slot sounding (hot) on deck B: bass ramps on its slot
+    try:
+        rig, on, t0 = fresh(0); rig.p[S.B][15] = 0.5; H = 8 * BAR
+        assert fx.transition(1, on, lambda: True, song=0) is True
+        bs = writes(rig, S.B, 14); assert bs[0][1] == 0.0 and 0.3 < val(rig, t0 + 4 * BAR, S.B, 14) < 0.7 and max(v2 - v1 for (_, v1), (_, v2) in zip(bs, bs[1:])) < 0.01, bs[:3]
+        assert 0.0 not in [w[3] for t, m, w in rig.log if m == S.MIX and 3 in w], 'deck B keeps its strip'
+    finally: fx.BLEND_ROWS = br0
 finally: S.call, fx.time, fx.quick, fx.setup = real_t['call'], real_t['time'], real_t['quick'], real_setup
+print('Song moves follow-ups offline: air only writes (C read a bar ahead), unchanged slot paths left alone, failed blend load reopens strips,'
+      ' first-half rows on a kept strip ramp on slot level < 1 % steps')
 print('Song moves offline: 6 ordered pairs -> blend (Lowdown/TOOM) or break & drop (any Disco pair), unlisted by key; bar 1 = the bar line after the press'
       ' (setup running past the beat too); blend 16 bars (strip rise 1-8, keys + vocals in < 1 % steps + HP sweep 9-16, fresh slots emptied then loaded,'
       ' a sounding drums slot queued), break 4 bars (STUT 1/4 1/4 1/8 1/16 per bar, air on beat 4: strips then STUT, drums slot swapped in the air,'

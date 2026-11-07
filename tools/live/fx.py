@@ -119,9 +119,13 @@ def setup(page, on, want):             # reads only: what comes in, what goes ou
     return dict(page=page, rows=rows, own=own, mix=mix, bring=bring, inn=inn, out=out, others=others, P=P, beat=60.0 / bpm(),
                 hot=[b for b in bring if sounding(b)], f0={d: [P[d][24 + k] for k in range(len(BASEF[d]))] for d in inn + out})
 deck_of = lambda r: r.get('deck', S.A)
-def load_now(d, paths):                # {slot: path} playing from now: the Recycler lands a new path at its 8-bar loop wrap, or at once in an
-    st = json.loads(S.call('vcvrack_get_module_state', {'id': d})); st.pop('params', None)   # empty slot (Recycler.cpp process: pending lands
-    sl = st['data']['slots']                                       # when wrapped || !running || !cur), so empty the slots first, then load.
+def get_state(d):                      # a deck's module state for load_now, data only (read ahead of a tight moment: the air)
+    st = json.loads(S.call('vcvrack_get_module_state', {'id': d})); st.pop('params', None); return st
+def load_now(d, paths, st=None):       # {slot: path} playing from now: the Recycler lands a new path at its 8-bar loop wrap, or at once in an
+    st = st or get_state(d)                                        # empty slot (Recycler.cpp process: pending lands when wrapped ||
+    sl = st['data']['slots']                                       # !running || !cur), so empty the slots first, then load. A slot that
+    paths = {k: p for k, p in paths.items() if sl[k]['path'] != p}   # has the path already plays it now: left alone (every write re-renders)
+    if not paths: return True
     if all(k in paths or not x['path'] for k, x in enumerate(sl)):   # never all four empty at once (the scan would deal the deck a new combo):
         for k, p in paths.items(): sl[k]['path'] = p               # then they wait for the wrap
         S.call('vcvrack_set_module_state', {'id': d, 'state': st}); return False
@@ -129,11 +133,11 @@ def load_now(d, paths):                # {slot: path} playing from now: the Recy
     S.call('vcvrack_set_module_state', {'id': d, 'state': st}); time.sleep(SWAP_GAP)
     for k, p in paths.items(): sl[k]['path'] = p
     S.call('vcvrack_set_module_state', {'id': d, 'state': st}); return True
-def bring_in(s, on, rows, level=None):   # pad 1 of these brought rows, per deck (level None = as its slot plays now)
+def bring_in(s, on, rows, level=None, sts={}):   # pad 1 of these brought rows, per deck (level None = as its slot plays now; sts: states read ahead)
     by = {}
     for b in rows: by.setdefault(deck_of(s['rows'][b]), []).append(b)
     for d, bs in by.items():
-        load_now(d, {s['rows'][b]['slot']: s['rows'][b]['samples'][0] for b in bs})
+        load_now(d, {s['rows'][b]['slot']: s['rows'][b]['samples'][0] for b in bs}, sts.get(d))
         if level is not None: put({d: {14 + s['rows'][b]['slot']: level(b) for b in bs}})
         for b in bs: on[s['page']][b] = 0
 def lvl(s, b, e, w, a=None):           # a brought-in row from a (default: where it was) to its row level
@@ -163,15 +167,21 @@ def blend(page, on, alive, bars, frm=None, tp=None):   # first half: the incomin
     cold = [b for b in s['bring'] if b not in s['hot']]            # brought rows on silent slots: loaded at once (they play from bar 1)
     lo, hi = [b for b in BLEND_ROWS[0] if b in cold], [b for b in BLEND_ROWS[1] if b in cold]
     rise = [d for d in inn if any(deck_of(rows[b]) == d for b in lo) and not any(deck_of(rows[b]) == d for b in s['hot'])]
+    lo_lv = [b for b in lo if deck_of(rows[b]) not in rise]        # first-half rows on a deck that keeps its strip: slot ramp, every LEVEL_STEP
     def bar1():                        # first half rises on the decks' STRIPS (Mixer slews them: no zipper), its slots at row level
         if rise: put({S.MIX: {STRIP[d]: 0.0 for d in rise}})
+        try: bring_in(s, on, cold, lambda b: rows[b]['level'] if b in lo and b not in lo_lv else 0.0)
+        except Exception:                                          # the strips never stay down on a failed load: back open, then the error
+            if rise: put({S.MIX: {STRIP[d]: S.U for d in rise}})
+            raise
         for d in rise: mix[STRIP[d]] = 0.0
-        bring_in(s, on, cold, lambda b: rows[b]['level'] if b in lo else 0.0)
         for b in s['hot']:                                         # the shared drums slot sounding (the outgoing drums): the new path
             r = rows[b]; S.play(r['slot'], r['samples'][0], s['P'][deck_of(r)][14 + r['slot']], deck_of(r)); on[page][b] = 0   # lands at the wrap
     last = [-1.0]
     def frame(t):
         w, e1, e2 = {S.MIX: {}}, smooth(t / H), smooth((t - H) / H)
+        if t <= H + LEVEL_STEP:                                    # first half, a deck that keeps its strip: slot levels, every LEVEL_STEP
+            for b in lo_lv: lvl(s, b, e1, w, 0.0)
         if t >= H:                                                 # second half: keys + vocals slot levels, every LEVEL_STEP
             for b in hi: lvl(s, b, e2, w, 0.0)
         if t - last[0] >= STEP - 1e-9:                             # filters + strips every STEP
@@ -211,9 +221,13 @@ def break_drop(page, on, alive, bars, frm=None, tp=None):   # the outgoing slots
         bring_in(s, on, [b for b in s['bring'] if b not in late], lambda b: 0.0)   # loaded now, silent: running in time by the drop
     def air():
         put({S.MIX: {STRIP[d]: 0.0 for d in brk + inn}}); release()   # strips to 0 first, then STUT let go
-        bring_in(s, on, late)                                      # the drums slot swapped in the silence: it plays from the drop
+        bring_in(s, on, late, None, sts)                           # the drums slot swapped in the silence (state read a bar ahead): set, gap, set
     B = 4 * beat; t_air, total = (bars - 1) * B + 3 * beat, bars * B
-    events = [(0.0, bar1)] + [(k * B, lambda k=k: stut(BREAK_STUT[k * len(BREAK_STUT) // bars])) for k in range(1, bars)] + [(t_air, air)]
+    sts = {}
+    def last_bar():                                                # the bar before the air: read the late decks' states now, so the air
+        for d in {deck_of(rows[b]) for b in late}: sts[d] = get_state(d)   # only writes
+    events = ([(0.0, bar1)] + [(k * B, lambda k=k: stut(BREAK_STUT[k * len(BREAK_STUT) // bars])) for k in range(1, bars)]
+              + [((bars - 1) * B, last_bar), (t_air, air)])
     def frame(t):
         if t <= t_air + STEP: e = smooth(t / t_air); put({d: {24 + k: x + (CLOSE - x) * e for k, x in enumerate(f0[d])} for d in brk})
     try:

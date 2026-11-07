@@ -154,6 +154,11 @@ try:
     check('break bar 4: STUT 1/16, TOOM strip still open', prm(S.B, fx.STUTLEN) == 2.0 and prm(S.B, fx.STUT) == 1.0 and st()[3] == U, f'len {prm(S.B, fx.STUTLEN)} strips {st()}')
     until(t0 + 3 * bar + 3.5 * beat); sa = st()
     check('break beat 4 of bar 4: air (STUT let go, TOOM + Disco strips at 0)', all(prm(S.B, fx.STUT + k) == 0.0 for k in range(4)) and sa[3] == 0.0 and sa[7] == 0.0, f'strips {sa}')
+    tl, td = None, t0 + 4 * bar                                       # report only: when the Disco drums (deck C slot 0, emptied in the air) sound
+    while time.time() < td + 3:                                       # = deck C drums output leaves exact 0 (an empty slot outputs 0.0)
+        o = json.loads(S.call('vcvrack_get_voltages', {'moduleId': C}))[0]['outputs']
+        if any(abs(v) > 0.0 for x in o if x['id'] == 0 for v in x['voltages']): tl = time.time(); break
+    print(f'INFO  Disco drums landed {round((tl - td) * 1000)} ms after the drop' if tl else 'INFO  Disco drums: no deck C output within 3 s of the drop', flush=True)
     until(t0 + 4 * bar + 2)
     check('drop: Disco full on (pad 1 rows, strip 8 up, B major 3418), TOOM out and reset', lv(S.B) == [0.0] * 4 and lv(S.D)[1] == 1.0 and lv(S.D)[0] == 1.0
           and path(C, 0).startswith('1-drums-08_chorus') and st()[7] == U and st()[3] == U and synths.scale_now() == 3418
