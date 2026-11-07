@@ -32,7 +32,7 @@ def launchpad():
                 for b, r in sorted(S.PAGES[pg]['rows'].items(), reverse=True)]
     bank = ST['bank']
     return dict(rows=rows, page=pg, pages=[p['name'] for p in S.PAGES], bank=bank, banks=len(fx.BANKS), machine=ST['machine'],
-                fx=[dict(note=n, name=nm, on=nm in ST['fx']) for n, nm in sorted(fx.BANKS[bank].items())],
+                fx=[dict(note=n, name=nm, on=nm in ST['fx'] or nm in fx.vox_lit(ST)) for n, nm in sorted(fx.BANKS[bank].items())],
                 color=fx.COLOR, busy=ST['busy'], hw=ST['hw'])
 def minilab():
     importlib.reload(maps); m = mode(); M = maps.MODES[m]; pm, pp, off, n = M['pads']; CC = ccmap(m)

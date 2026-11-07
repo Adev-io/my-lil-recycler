@@ -143,6 +143,46 @@ try:                                                                            
 finally:
     fx.bpm, fx.strips, fx.set_strips, fx.STEP = (real_dnb[k] for k in ('bpm', 'strips', 'set_strips', 'STEP'))
     S.current_drum_pattern, S.drum_pattern = real_dnb['cdp'], real_dnb['dp']
+assert {n: fx.FX3[n] for n in (12, 13, 14, 15)} == {12: 'vox 1/4', 13: 'vox 1/8', 14: 'vox 1/16', 15: 'vox 1/32'} and fx.FX3[11] == 'drums in/out'
+assert (fx.STUT, fx.STUTLEN, fx.VOX_SLOT) == (40, 44, 3) and fx.VOX_STUT == {'vox 1/4': 0, 'vox 1/8': 1, 'vox 1/16': 2, 'vox 1/32': 3}
+real_vox = dict(call=S.call, vox_stut=fx.vox_stut)
+try:                                                                            # bank 3 vox stutter holds (pads.py: vox / vox_up / clean -> fx.vox_*)
+    got = []; S.call = lambda name, args=None: got.append((name, args)) or '[]'
+    fx.vox_stut(S.A, 2); fx.vox_stut(S.B, None)                                  # one set_params call each: length + hold, or the hold let go
+    assert got == [('vcvrack_set_params', {'moduleId': S.A, 'params': [{'id': 44, 'value': 2.0}, {'id': 43, 'value': 1.0}]}),
+                   ('vcvrack_set_params', {'moduleId': S.B, 'params': [{'id': 43, 'value': 0.0}]})], got
+    S.call = real_vox['call']
+    vs = []; fx.vox_stut = lambda d, div: vs.append((d, div))
+    st = {'vox': {}, 'down': set()}; A, B = fx.own_deck(0), fx.own_deck(1)
+    def hw_on(note, page): st['down'].add(note); return fx.vox_on(st, note, fx.FX3[note], fx.own_deck(page), True)   # pads.on_msg + act
+    def hw_off(note): st['down'].discard(note); v = st['vox'].get(note); return v and v[2] and fx.vox_off(st, note)
+    hw_on(12, 0); assert vs == [(A, 0)] and fx.vox_lit(st) == {'vox 1/4'}, vs                       # hold 1/4 on Lowdown vocals
+    vs.clear(); hw_on(13, 0); assert vs == [(A, 1)] and fx.vox_lit(st) == {'vox 1/4', 'vox 1/8'}, vs   # slide: length only, no let go
+    vs.clear(); hw_off(12); assert vs == [] and fx.vox_lit(st) == {'vox 1/8'}, vs                    # 13 still down: keeps going at 1/8
+    vs.clear(); hw_off(13); assert vs == [(A, None)] and st['vox'] == {} and not fx.vox_lit(st), vs  # last one up: let go
+    vs.clear(); hw_on(12, 0); hw_on(14, 0); hw_off(14); assert vs == [(A, 0), (A, 2), (A, 0)] and list(st['vox']) == [12], vs   # latest up: back to 1/4
+    hw_off(12); vs.clear()
+    hw_on(12, 0); vs.clear(); page_now = 1                                          # page turn to TOOM mid-hold (vox_off takes no page:
+    assert hw_off(12) and vs == [(A, None)], vs                                     # the release goes to the deck the hold started on)
+    vs.clear(); hw_on(12, page_now); assert vs == [(B, 0)] and st['vox'][12][0] == B, vs   # page 2 on show: TOOM vocals (deck B)
+    hw_off(12); assert vs == [(B, 0), (B, None)], vs
+    vs.clear(); st['down'].discard(15); fx.vox_on(st, 15, 'vox 1/32', A, True); assert vs == [(A, 3), (A, None)] and st['vox'] == {}, vs   # quick stab: up before the hold landed
+    vs.clear(); fx.vox_on(st, 13, 'vox 1/8', A, False); assert vs == [(A, 1)] and st['vox'][13][2] is False   # page click: on, no note off to come
+    assert not hw_off(13) and vs == [(A, 1)], vs                                    # a note off on a page-held pad lets nothing go
+    fx.vox_on(st, 13, 'vox 1/8', A, False); assert vs == [(A, 1), (A, None)] and st['vox'] == {}, vs   # click again: off
+    vs.clear(); hw_on(12, 0); hw_on(14, 1); fx.vox_clean(st); assert vs[2:] and sorted(vs[2:], key=str) == sorted([(A, None), (B, None)], key=str) and st['vox'] == {}, vs   # clean: both decks
+    assert not hw_off(12) and not hw_off(14) and len(vs) == 4, vs                   # pads come up after clean: nothing more sent
+    def boom(d, div):
+        if div is None: raise RuntimeError('no rig')
+        vs.append((d, div))
+    vs.clear(); fx.vox_stut = boom; hw_on(12, 0)
+    try: hw_off(12); raise AssertionError('vox_off swallowed the error')
+    except RuntimeError: pass
+    assert 12 in st['vox'] and fx.vox_lit(st) == {'vox 1/4'}, st                     # off failed: still held + lit, the next press / clean retries
+    fx.vox_stut = lambda d, div: vs.append((d, div)); fx.vox_clean(st); assert st['vox'] == {} and vs[-1] == (A, None), vs
+finally: S.call, fx.vox_stut = real_vox['call'], real_vox['vox_stut']
+print('Vox offline: FX3 12-15, one set_params call per hold / let go, slide = length only, first up keeps the second, latest up = back to the first length,'
+      ' page turn releases the deck it started on, page 2 = deck B, quick stab, page click toggles, clean lets both decks go, failed off stays held')
 print('DnB offline: snapshot records the set tempo, release + clean return to it (128), a snapshot without bpm falls back to 120')
 print('Synths offline: auto_step mutate/next/undo + first-of-song + acid error keeps arp, hold-button release, octjump at 4, ramp cut-off, cancelled acid_out writes nothing after, acid_in floor 0.5, exception restores open, arp_in roll + ROLLS put back,'
       ' finished out after a newer press writes nothing, arp_in cut off in its roll writes no gate, held arp roll left alone')

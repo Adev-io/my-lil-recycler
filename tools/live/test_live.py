@@ -126,7 +126,13 @@ try:
     # ---- bank 3
     bank(2); a = st()[4]; press(11); time.sleep(fx.bars_secs(fx.FADE_BARS) + 1); b = st()[4]; press(11); time.sleep(fx.bars_secs(fx.FADE_BARS) + 1)
     check('drums in/out fades tracked drums out and back', a > 0.5 and b == 0 and abs(st()[4] - a) < 0.01, f'{a} -> {b} -> {st()[4]}')
-    bank(0)
+    VS = fx.STUT + fx.VOX_SLOT                                         # vox stutter (Recycler 2.4.0): a page click holds, again lets go
+    for pg, d, o in ((0, S.A, S.B), (1, S.B, S.A)):
+        n = len(json.loads(S.call('vcvrack_get_params', {'moduleId': d})))
+        if n <= fx.STUTLEN: print(f'SKIP  vox 1/8 on page {pg + 1}  deck has {n} params (Recycler before 2.4.0)', flush=True); continue
+        page(pg); press(13); a = (prm(d, VS), prm(d, fx.STUTLEN), prm(o, VS), fxon('vox 1/8')); press(13); b = (prm(d, VS), fxon('vox 1/8'))
+        check(f'vox 1/8 on page {pg + 1} holds its vocals stutter at 1/8, click again lets go', a == (1.0, 1.0, 0.0, True) and b == (0.0, False), f'held {a} let go {b}')
+    page(0); bank(0)
 
     # ---- Synths page (page 3): it acts on the song last shown, here TOOM (page 3 is reached through page 2)
     page(1); page(2); names = [r['name'] for r in get()['launchpad']['rows']]

@@ -95,7 +95,7 @@ def dnb_release(state, alive):         # snapshot dropped once the release has f
 
 # Bank 2 (2026-11-06, Ari: the round button at the right end of the moves row flips to 8 more moves). pads.py keeps the toggles.
 FX2 = {11: 'acid in/out', 12: 'arp in/out', 13: 'voice in/out', 14: 'acid sweep', 15: 'break fill', 16: 'no bass', 17: 'no vocals', 18: 'breakdown'}
-FX3 = {11: 'drums in/out'}                                         # bank 3 (2026-11-06): tracked drums fade; pads 12-18 free for later
+FX3 = {11: 'drums in/out', 12: 'vox 1/4', 13: 'vox 1/8', 14: 'vox 1/16', 15: 'vox 1/32'}   # bank 3: tracked drums fade, vox stutter holds; 16-18 free
 BANKS = [FX, FX2, FX3]
 FADE_BARS = 4                                                      # drums in/out: the record's drum stem (deck C strip) fades over 4 bars
 BANK_CC = 19                                                       # right column, bottom round button (end of the moves row)
@@ -110,3 +110,28 @@ def acid_cutoff(v=None):                                           # My lil Acid
     if v is None: return next(p['value'] for p in json.loads(S.call('vcvrack_get_params', {'moduleId': S.ACID})) if p['id'] == 1)
     S.call('vcvrack_set_params', {'moduleId': S.ACID, 'params': [{'id': 1, 'value': round(v, 3)}]})
 def bars_secs(n): return n * 4 * 60.0 / bpm()
+
+# Bank 3 vox stutter (2026-11-06, Recycler 2.4.0 STUT, docs/superpowers/specs/2026-11-06-recycler-stutter-design.md): hold pads on the
+# vocals slot of the song on show. state['vox'] = {note: (deck, name, hw)} in press order; pads.py calls these under HOLDL.
+STUT, STUTLEN, VOX_SLOT = 40, 44, 3                                # STUT_PARAM 40-43 (hold per slot), STUTLEN_PARAM 44 (0 = 1/4 bar .. 3 = 1/32)
+VOX_STUT = {'vox 1/4': 0, 'vox 1/8': 1, 'vox 1/16': 2, 'vox 1/32': 3}
+def vox_stut(deck, div):                                           # div None = let go; else length + hold in one call
+    S.call('vcvrack_set_params', {'moduleId': deck, 'params': [{'id': STUT + VOX_SLOT, 'value': 0.0}] if div is None else
+                                  [{'id': STUTLEN, 'value': float(div)}, {'id': STUT + VOX_SLOT, 'value': 1.0}]})
+def vox_on(state, note, name, deck, hw):                           # a press: hold (another vox pad held on that deck = slide, no let go)
+    if note in state['vox']: return vox_off(state, note)           # a held pad again (a page click) = let go
+    vox_stut(deck, VOX_STUT[name]); state['vox'][note] = (deck, name, hw)   # held only once the rig took it
+    if hw and note not in state['down']: vox_off(state, note)     # quick stab: the pad came up before the hold landed
+    return True
+def vox_off(state, note):                                          # let go; the deck it started on, whatever page is on show now
+    v = state['vox'].get(note)
+    if v is None: return False                                     # already let go (clean, a page click, the other release path)
+    same = [n for n, x in state['vox'].items() if x[0] == v[0]]   # vox pads held on that deck, press order
+    if len(same) == 1: vox_stut(v[0], None)                        # the last one off lets go
+    elif same[-1] == note: vox_stut(v[0], VOX_STUT[state['vox'][same[-2]][1]])   # the latest off: back to the length of the one still held
+    del state['vox'][note]; return True                            # (a failed write above leaves it held: the next press / clean tries again)
+def vox_clean(state):                                              # clean: every held vox stutter let go
+    for d in {x[0] for x in state['vox'].values()}:
+        vox_stut(d, None)                                          # a failed write keeps that deck's pads held
+        for n in [n for n, x in state['vox'].items() if x[0] == d]: del state['vox'][n]
+def vox_lit(state): return {x[1] for x in list(state['vox'].values())}   # lit from the holds, not state['fx']: the 5 s refresh never touches them

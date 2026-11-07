@@ -1,6 +1,7 @@
 # Launchpad Mini MK3 (Programmer mode) -> the set by rows. Each row in sections.ROWS = one slot (row 1 vocals, row 2 keys ...):
 # a pad picks that row's sample (blinking blue = playing), the lit pad again mutes the row. Pressed pad flashes white.
 # Row 8 (fx.FX) = transition moves; a toggled move blinks blue, pressing it again releases it. The moves row is on every page.
+# Bank 3 vox 1/4 .. 1/32 = Recycler STUT on the vocals of the song on show, held while the pad is down (a page click toggles).
 # Top-row Drums / Keys / User buttons (CC 96/97/98) = MiniLab program: drums + mix map (minilab.py) / Synths (acid.py) /
 # Acid Env (acid.py env: filter + amp ADSR).
 # Top-row arrows left/right (CC 93/94) = previous/next page (sections.PAGES: 1 Lowdown, 2 Time Out Of Mind, 3 Synths). A page turn changes
@@ -13,7 +14,7 @@ LOG = open(os.path.join(here, 'pads.log'), 'a', buffering=1); sys.stderr = LOG
 import sections, fx, synths
 STOP = os.path.join(here, 'pads.stop')
 state = {'on': [{} for _ in sections.PAGES], 'page': 0, 'busy': False, 'fx': set(), 'gen': 0, 'dgen': 0, 'snap': None, 'hw': False, 'swept': [], 'tgen': 0, 'hush': {}, 'bank': 0, 'saved': {}, 'agen': 0, 'machine': True, 'fgen': 0, 'fading': False, 'acts': 0,
-         'song': 0, 'held': set(), 'auto': set(), 'phrase': 8, 'egen': {}, 'edir': {}, 'slit': set(), 'down': set()}   # egen / edir: per entry move (acid, arp)
+         'song': 0, 'held': set(), 'auto': set(), 'phrase': 8, 'egen': {}, 'edir': {}, 'slit': set(), 'down': set(), 'vox': {}}   # egen / edir: per entry move (acid, arp); vox: fx.vox_on
 HUSH = {'drums only': (1, 2, 3, 5, 6), 'no drums': (0, 4)}       # Mixer strips each move silences: drums only = Acid, decks A/B,
                                                                  # Acid Voice, Triple; no drums = My lil Drums + the drum stem
 lp = lambda names, pre: next((x for x in names if x.startswith(pre)), None)        # Launchpad unplugged -> page only
@@ -94,8 +95,9 @@ def paint():
         for i in range(len(r['samples'])):
             if ON().get(b) == i: led(b + i, 0); led(b + i, 45, ch=1)    # engaged: blinks blue (ch 1 alternates with the ch 0 colour, off)
             else: led(b + i, r['color'])
+    vl = fx.vox_lit(state)
     for n, name in MOVES().items():
-        if name in state['fx']: led(n, 0); led(n, 45, ch=1)
+        if name in state['fx'] or name in vl: led(n, 0); led(n, 45, ch=1)
         else: led(n, fx.COLOR)
     cc_ = lambda c, v: lp_send(mido.Message('control_change', control=c, value=v))
     cc_(fx.BANK_CC, fx.COLOR if state['bank'] else 1)           # lit = bank 2
@@ -223,6 +225,9 @@ def fx_act(name):
                 time.sleep(fx.STEP)
         threading.Thread(target=fade, daemon=True).start()
     elif name == 'clean':
+        try:
+            with HOLDL: fx.vox_clean(state)                       # held vox stutters let go (their decks, whatever page is on show)
+        except Exception: LOG.write(traceback.format_exc())       # the rest of clean still runs
         state['fgen'] += 1; state['fading'] = False
         for n in ('acid sweep', 'no bass', 'no vocals', 'breakdown'):
             if n in state['fx']: release(n)
@@ -237,6 +242,14 @@ def release(name):                                              # put a bank-2 m
     if name == 'acid sweep': state['agen'] += 1; fx.acid_cutoff(s)
     elif name in fx.SLOT_TOGGLE: fx.slot_level(s[0], s[1], s[2])
     elif name == 'breakdown': fx.set_deck_filters(s[0], s[1]); fx.set_strip_map(s[2])
+def vox(note, name, hw):                                        # bank 3 vox pad press: hold on the song on show's own deck (fx.vox_on)
+    with HOLDL: fx.vox_on(state, note, name, fx.own_deck(SP()), hw)
+    LOG.write(time.ctime() + f" fx {name} -> vox held {sorted((n, x[1]) for n, x in state['vox'].items())}\n")
+def vox_up(note):                                               # Launchpad note off on a held vox pad (never waits on busy)
+    try:
+        with HOLDL: fx.vox_off(state, note)
+    except Exception: LOG.write(traceback.format_exc())         # off failed: still held, a press / clean tries again
+    LOG.write(time.ctime() + f" vox {note} up -> held {sorted((n, x[1]) for n, x in state['vox'].items())}\n"); paint()
 def synth_act(note, hw=False):                                  # a Synths pad: one action, a held fill, or an auto setting
     label, kind, arg = synths.pads(SP())[note]
     if kind in HOLD:
@@ -269,7 +282,7 @@ def let_go(note):                                               # Launchpad note
 def act(note, hw=False):
     try:
         importlib.reload(sections); importlib.reload(fx)            # not synths: a reload would swap ARP_LOCK and drop _open under running threads
-        if note in MOVES(): fx_act(MOVES()[note])
+        if note in MOVES(): vox(note, MOVES()[note], hw) if MOVES()[note] in fx.VOX_STUT else fx_act(MOVES()[note])
         elif SYN(): synth_act(note, hw)
         else:
             rows, on = R(), ON(); b, i = pad(note); r = rows[b]
@@ -288,11 +301,13 @@ def press(note, hw=False):                                      # hardware pad (
     state['busy'] = True; threading.Thread(target=act, args=(note, hw), daemon=True).start(); return True
 def on_msg(msg):
     if msg.type == 'note_on' and msg.velocity:
-        if SYN(): state['down'].add(msg.note)                    # Synths pads physically down (a song-page pad is not tracked)
+        if SYN() or MOVES().get(msg.note) in fx.VOX_STUT: state['down'].add(msg.note)   # Synths / vox pads physically down (a song-page pad is not tracked)
         press(msg.note, True)
     elif msg.type in ('note_on', 'note_off'):                    # release: lets go of a held pad pressed on the Synths page
         was = msg.note in state['down']; state['down'].discard(msg.note)   # (a song-page pad 61 never lets go of a page-held fill)
         if msg.note in state['held'] and (SYN() or was): threading.Thread(target=let_go, args=(msg.note,), daemon=True).start()
+        v = state['vox'].get(msg.note)                           # after the discard: a hold landing later sees the pad up (fx.vox_on)
+        if v and v[2]: threading.Thread(target=vox_up, args=(msg.note,), daemon=True).start()   # Launchpad-held only: a page click toggles
     elif msg.type == 'control_change' and msg.value and msg.control in ARROWS: turn(ARROWS[msg.control])
     elif msg.type == 'control_change' and msg.value and msg.control in MODE_CC: minilab(MODE_CC[msg.control])
     elif msg.type == 'control_change' and msg.value and msg.control == fx.BANK_CC: flip()

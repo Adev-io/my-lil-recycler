@@ -131,6 +131,14 @@ try:
                 p2, on2 = round(prm(S.DRUMS, 3)) + 1, fxon(name)
                 check(f'bank {bk + 1} break fill', ok1 and p1 == fx.BREAK and on1 and p2 == round(b[S.DRUMS][3]) + 1 and not on2 and logged(n0, 'fx break fill'),
                       f'pattern {round(b[S.DRUMS][3]) + 1} -> {p1} -> {p2}')
+            elif name in fx.VOX_STUT:                                            # vox stutter (Recycler 2.4.0): a click holds the song on show's
+                VS = fx.STUT + fx.VOX_SLOT                                       # vocals at its length, a second click lets go; Lowdown, then TOOM
+                for pg, d, o in ((0, S.A, S.B), (1, S.B, S.A)):
+                    if len(b[d]) <= fx.STUTLEN: print(f'SKIP  bank {bk + 1} {name} page {pg + 1}  deck has {len(b[d])} params (Recycler before 2.4.0)', flush=True); continue
+                    page(pg); ok1 = press(note); h = (prm(d, VS), prm(d, fx.STUTLEN), prm(o, VS), fxon(name))
+                    ok2 = press(note); a = (prm(d, VS), fxon(name))
+                    check(f'bank {bk + 1} {name} page {pg + 1}', ok1 and ok2 and h == (1.0, float(fx.VOX_STUT[name]), 0.0, True) and a == (0.0, False), f'held {h} let go {a}')
+                page(0)
             else: check(f'bank {bk + 1} {name}', False, 'no check written for this move')
     settle(); bank(0)
 
