@@ -44,22 +44,33 @@ def flip():                                                     # the round butt
     state['bank'] = (state['bank'] + 1) % len(fx.BANKS); LOG.write(time.ctime() + f" moves bank {state['bank'] + 1}\n"); paint(); return True
 MODE_CC = {96: 'mix', 97: 'acid', 98: 'env'}                     # top row Drums / Keys / User buttons: MiniLab = drums + mix map / Synths / Acid Env
 MODEF = os.path.join(here, 'minilab.mode')
+MODE_LOCK = threading.Lock()                                     # one MiniLab swap at a time: never two acid.py
+state.update(mreq=0, mrun=None)                                  # mreq = latest mode press; mrun = program go() last launched (None = unknown)
 def mode_now():
     try: return open(MODEF).read().strip()
     except OSError: return ''
 def minilab(m):                                                 # swap (or restart, e.g. after plugging it in) the MiniLab program
     if m not in MODE_CC.values(): return False                   # Windows lets one program hold the MiniLab
     open(MODEF, 'w').write(m)                                    # the page relabels at once, plugged in or not
+    state['mreq'] += 1; n = state['mreq']
     def go():
-        f = lambda n: os.path.join(here, n)
-        open(f('acid.stop'), 'w').close()                        # acid.py lets go (note-offs, sequencer back on) and removes acid.stop
-        for _ in range(8):
-            if not os.path.exists(f('acid.stop')): break
-            time.sleep(0.25)
-        for n in ('acid.stop', 'minilab.stop'):                  # stale stop files would end the new program at once
-            if os.path.exists(f(n)): os.remove(f(n))
-        subprocess.Popen([sys.executable, 'minilab.py'] if m == 'mix' else [sys.executable, 'acid.py', m], cwd=here)   # acid.py stops minilab.py itself
-        LOG.write(time.ctime() + f' minilab -> {m}\n'); time.sleep(1.0); paint()
+        with MODE_LOCK:
+            if state['mreq'] != n: return                        # a newer press is waiting: it does the swap (the last press wins)
+            f = lambda x: os.path.join(here, x)
+            if state['mrun'] != 'mix':                           # an acid.py may run: it lets go (note-offs, sequencer back on), removes acid.stop
+                open(f('acid.stop'), 'w').close()                # (from mix there is none; acid.py itself stops minilab.py via minilab.stop)
+                for _ in range(8):
+                    if not os.path.exists(f('acid.stop')): break
+                    time.sleep(0.25)
+            for x in ('acid.stop', 'minilab.stop'):              # stale stop files would end the new program at once
+                if os.path.exists(f(x)): os.remove(f(x))
+            logf = f('minilab.log' if m == 'mix' else 'acid.log'); n0 = os.path.getsize(logf) if os.path.exists(logf) else 0
+            p = subprocess.Popen([sys.executable, 'minilab.py'] if m == 'mix' else [sys.executable, 'acid.py', m], cwd=here)
+            state['mrun'] = m; LOG.write(time.ctime() + f' minilab -> {m}\n')
+            for _ in range(16):                                  # LED once the new program is up (first log line) or has given up
+                if p.poll() is not None or (os.path.exists(logf) and os.path.getsize(logf) > n0): break
+                time.sleep(0.25)
+            paint()
     threading.Thread(target=go, daemon=True).start(); return True
 def pad(note):                                                  # note -> (row base, sample index) or None
     for b, r in R().items():

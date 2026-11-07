@@ -17,12 +17,13 @@ STOP, MLSTOP = os.path.join(here, 'acid.stop'), os.path.join(here, 'minilab.stop
 OCT, ACC_VEL, RESUME = -12, 100, 2.0
 TICK, REFRESH, TOL = 0.05, 1.0, 0.05
 import maps                                   # the map lives in maps.py (shared with the virtual controller page)
-MODE = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in ('acid', 'env') else 'acid'   # acid = Synths, env = Acid Env
-MAP = dict(maps.MODES[MODE]['cc'])            # CC -> (module, param, scale, label)
 TOLS = maps.ACID_TOLS                         # (module, param) -> pickup tolerance
 pending, cur, prev, eng, held, lock = {}, {}, {}, set(), set(), threading.Lock()
 seq = {'off': False, 'release': 0.0}
 log = lambda s: LOG.write(time.ctime() + ' ' + s + '\n')
+MODE = sys.argv[1] if len(sys.argv) > 1 else 'acid'                # acid = Synths, env = Acid Env
+if MODE not in maps.MODES or MODE == 'mix': log(f'unknown mode {MODE}, using acid'); MODE = 'acid'
+MAP = dict(maps.MODES[MODE]['cc'])            # CC -> (module, param, scale, label)
 out = mido.open_output(next(x for x in mido.get_output_names() if x.startswith('loopMIDI Port 1')))
 def on_msg(m):
     if m.type == 'control_change' and m.control in MAP:
@@ -103,5 +104,8 @@ log(f'start ({MODE}: {maps.MODES[MODE]["title"]}): keys play the bass, pads = ac
 while not os.path.exists(STOP): time.sleep(0.25)
 inp.close()
 for n in list(held): out.send(mido.Message('note_off', note=n))
-S.call('vcvrack_set_params', {'moduleId': ACID, 'params': [{'id': 25, 'value': 1.0}]})
-os.remove(STOP); log('stopped')
+try: S.call('vcvrack_set_params', {'moduleId': ACID, 'params': [{'id': 25, 'value': 1.0}]})   # sequencer back on
+except Exception as e: log(f'stop: sequencer back on failed ({str(e)[:80]})')
+try: os.remove(STOP)
+except OSError: pass
+log('stopped')
