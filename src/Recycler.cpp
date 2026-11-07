@@ -993,6 +993,14 @@ struct Recycler : Module
         else retargetRequest = true;
     }
 
+    // A STUT hold never survives a patch load: Rack adds a loaded module to the engine after fromJson, so this runs once
+    // its saved params are in. Not in dataFromJson: the live tools write module state (a slot path) on every pad, and
+    // that must not drop a hold mid-stutter. (onReset: Rack resets params to default, so the holds are up anyway.)
+    void onAdd (const AddEvent& e) override
+    {
+        for (int i = 0; i < 4; ++i) params[STUT_PARAM + i].setValue (0.f);
+    }
+
     void onReset (const ResetEvent& e) override
     {
         Module::onReset (e);
@@ -1358,7 +1366,6 @@ struct Recycler : Module
         if (flag (root, "deck", b)) deckJson = b;
         deck = deckJson;   // patches from 2.0.0 have no key: off
         for (int i = 0; i < 4; ++i) deckSteps[i].store (0);   // presses counted before a load never apply after it
-        for (int i = 0; i < 4; ++i) params[STUT_PARAM + i].setValue (0.f);   // a STUT hold never survives a reload
         if (deckJson) for (int i = 0; i < 4; ++i) params[LOCK_PARAM + i].setValue (0.f);   // a deck patch never fires a previous step
         if (number (root, "bpm", v)) params[BPM_PARAM].setValue ((float) clampD (v, 40.0, 240.0));
         if (number (root, "root", v)) params[ROOT_PARAM].setValue ((float) std::round (clampD (v, 0.0, 11.0)));
