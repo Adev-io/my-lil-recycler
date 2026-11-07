@@ -56,7 +56,7 @@ def set_deck_filters(d, v): S.call('vcvrack_set_params', {'moduleId': d, 'params
 # Song-to-song moves (2026-11-06, Ari: "each pair its own"; docs/superpowers/specs/2026-11-06-song-transitions-design.md). The 'transition'
 # pad runs the move for (song playing -> song on show). The table is data: retune a pair here. Unlisted pairs: same key = blend, else break & drop.
 MOVES = {(0, 1): ('blend', 16), (1, 0): ('blend', 16),                                   # Lowdown <-> TOOM, both D major
-         (0, 2): ('break_drop', 4), (2, 0): ('break_drop', 4), (1, 2): ('break_drop', 4), (2, 1): ('break_drop', 4)}   # in / out of Disco (B major)
+         (0, 2): ('break_drop', 4), (2, 0): ('break_drop', 4), (1, 2): ('break_drop', 4), (2, 1): ('break_drop', 4)}   # in / out of Disco (its own move, kept after Disco went to D)
 BLEND_ROWS = ((41, 21), (71, 81))      # blend, silent song on show: first half its bass + drums rows come up (pad 1), second half keys + vocals
 BREAK_STUT = (0, 0, 1, 2)              # break: STUT LEN per quarter of the break = 1/4, 1/4, 1/8, 1/16 bar (4 bars: one per bar)
 CLOSE = LP                             # break: the outgoing filters close. The rig has no echo (2026-11-06: no delay module, Mixer sends 1-2

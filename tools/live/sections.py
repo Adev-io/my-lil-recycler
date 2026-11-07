@@ -124,15 +124,16 @@ ROWS_DISCO = {
 }
 PAGES = [dict(name='Lowdown', rows=ROWS, deck=A), dict(name='Time Out Of Mind', rows=ROWS_TOOM, deck=B), dict(name='Disco Ulysses', rows=ROWS_DISCO, deck=D)]   # deck = the song's own deck
 # Arp keys per song page (pitch classes, C = 0). scale_scan.py 2026-11-06: both songs' bass sits in D major (D E F# G A B C#).
-# Disco Ulysses: B major (B C# D# E F# G# A#, mask 3418; the crate's pin, key 11). If A# rubs: (1, 3, 4, 6, 8, 11) = mask 2394.
-SCALES = {0: (1, 2, 4, 6, 7, 9, 11), 1: (1, 2, 4, 6, 7, 9, 11), 2: (1, 3, 4, 6, 8, 10, 11)}
+# Disco Ulysses: recorded in B major (the crate's pin, key 11); 2026-11-07 Ari: into TOOM's key -> deck D ROOT = D, the Recycler
+# renders every Disco loop +3 semitones (drums unshifted), so it is D major like the others (was B major, mask 3418).
+SCALES = {0: (1, 2, 4, 6, 7, 9, 11), 1: (1, 2, 4, 6, 7, 9, 11), 2: (1, 2, 4, 6, 7, 9, 11)}
 # Acid patterns per song for the Synths page row 8 and phrase auto-change. acid_slots.py 2026-11-06: 8, 9, 15, 16, 19 sit inside
 # the arp scale; 11, 12, 13, 17, 18 fall outside it and are dropped. The vamps stay first though outside too (10 has G# + A#,
 # 14 has A#: chromatic passing notes against D major).
 # Disco (2026-11-06, all 32 slots read against B major at TRANSPOSE 0; no page turn changes TRANSPOSE): 25 (starts on B: B C# E F# G#)
 # and 12 (F#/B pump) sit inside B major; 2 (E D F# B, starts on E like the record's bar 1) and 22 (C# D F# B) add only D natural,
 # the blue note of the record's own verse riff. No vamp for this song: the tonic pattern goes first.
-ACID_SONG = {0: [10, 8, 9], 1: [14, 15, 16, 19], 2: [25, 12, 2, 22]}
+ACID_SONG = {0: [10, 8, 9], 1: [14, 15, 16, 19], 2: [14, 15, 16, 19]}   # Disco now in D (ROOT = D): TOOM's set; its B-major set was [25, 12, 2, 22]
 PAGES.append(dict(name='Synths', rows={}, synth=True))   # page 4: arp + acid controls (synths.py); it and its moves act on the song playing
 def base(strips=True):                                         # deck A + deck B strips; deck A slots without a row silent (strips=False: mixer strips untouched, a crash respawn)
     mix = {p['id']: p['value'] for p in json.loads(call('vcvrack_get_params', {'moduleId': MIX}))}

@@ -145,8 +145,8 @@ try:
     check('blend done: Lowdown out, TOOM pad 1 rows in', lv(S.A) == [0.0] * 4 and lv(S.B) == [1.0, 1.0, 0.0, 1.0] and path(C, 0).startswith('1-drums-05') and st()[2] == U
           and st()[3] == U and get()['launchpad']['song'] == 1 and synths.scale_now() == 2774, f'A {lv(S.A)} B {lv(S.B)} strips {st()}')
     page(2); post('/press', {'note': 17}); t0 = wait_for(lambda: prm(S.B, fx.STUT) == 1.0, 4)   # break: starts with the STUT hold on TOOM
-    check('break bar 1: TOOM slots held at STUT 1/4, arp on the shared notes (2130), Disco silent', t0 and all(prm(S.B, fx.STUT + k) == 1.0 for k in range(4))
-          and prm(S.B, fx.STUTLEN) == 0.0 and synths.scale_now() == 2130 and st()[7] == 0.0, f'scale {synths.scale_now()} strips {st()}')
+    check('break bar 1: TOOM slots held at STUT 1/4, arp on the shared notes, Disco silent', t0 and all(prm(S.B, fx.STUT + k) == 1.0 for k in range(4))
+          and prm(S.B, fx.STUTLEN) == 0.0 and synths.scale_now() == synths.mask_of(set(S.SCALES[1]) & set(S.SCALES[2])) and st()[7] == 0.0, f'scale {synths.scale_now()} strips {st()}')
     t0 = t0 or time.time()
     until(t0 + 2.5 * bar); f3 = fx.deck_filters(S.B)
     check('break bar 3: STUT 1/8, TOOM filters closing', prm(S.B, fx.STUTLEN) == 1.0 and prm(S.B, fx.STUT) == 1.0 and f3[0] < -0.3, f'len {prm(S.B, fx.STUTLEN)} filters {[round(x, 2) for x in f3]}')
@@ -160,11 +160,11 @@ try:
         if any(abs(v) > 0.0 for x in o if x['id'] == 0 for v in x['voltages']): tl = time.time(); break
     print(f'INFO  Disco drums landed {round((tl - td) * 1000)} ms after the drop' if tl else 'INFO  Disco drums: no deck C output within 3 s of the drop', flush=True)
     until(t0 + 4 * bar + 2)
-    check('drop: Disco full on (pad 1 rows, strip 8 up, B major 3418), TOOM out and reset', lv(S.B) == [0.0] * 4 and lv(S.D)[1] == 1.0 and lv(S.D)[0] == 1.0
-          and path(C, 0).startswith('1-drums-08_chorus') and st()[7] == U and st()[3] == U and synths.scale_now() == 3418
+    check('drop: Disco full on (pad 1 rows, strip 8 up, its scale), TOOM out and reset', lv(S.B) == [0.0] * 4 and lv(S.D)[1] == 1.0 and lv(S.D)[0] == 1.0
+          and path(C, 0).startswith('1-drums-08_chorus') and st()[7] == U and st()[3] == U and synths.scale_now() == synths.mask_of(S.SCALES[2])
           and [round(x, 2) for x in fx.deck_filters(S.B)] == fx.BASEF[S.B], f'B {lv(S.B)} D {lv(S.D)} strips {st()} scale {synths.scale_now()}')
     page(0); time.sleep(1)                                             # the song playing follows the transition, never the page on show
-    check('Disco playing: arp B major (3418) + MiniLab on deck D, also with the Lowdown page on show', get()['launchpad']['song'] == 2 and synths.scale_now() == 3418
+    check('Disco playing: arp on its scale + MiniLab on deck D, also with the Lowdown page on show', get()['launchpad']['song'] == 2 and synths.scale_now() == synths.mask_of(S.SCALES[2])
           and get()['minilab']['faders'][1]['label'] == 'piano vol' and maps.page_now() == 2, f"song {get()['launchpad']['song']} scale {synths.scale_now()}")
     press(17); time.sleep(fx.bars_secs(4) + 3)                               # Disco -> Lowdown: break & drop
     check('transition Disco -> Lowdown: Disco out, strip 8 back to 0', lv(S.D) == [0.0] * 4 and st()[7] == 0.0 and lv(S.A)[1] == 1.2 and path(C, 0).startswith('1-drums-15'), f'A {lv(S.A)} D {lv(S.D)} strips {st()}')
