@@ -132,28 +132,28 @@ def acid_in(level, alive):                                           # strip up,
         fx.acid_cutoff(CLOSED); fx.set_strip_map({1: level})
         ok = ramp(fx.acid_cutoff, CLOSED, c, fx.bars_secs(2), alive)
     finally:
-        if ok is not False: fx.acid_cutoff(c); _open.pop('cut', None)
+        if ok is not False and alive(): fx.acid_cutoff(c); _open.pop('cut', None)   # a newer press owns the knob: write nothing
 def acid_out(alive):                                                 # cutoff closes over 2 bars, strip down, cutoff back for next time
     cur = fx.acid_cutoff(); c, ok = _hold('cut', cur), None
     try: ok = ramp(fx.acid_cutoff, cur, CLOSED, fx.bars_secs(2), alive)
     finally:
-        if ok: fx.set_strip_map({1: 0.0})                            # strip down only when the out completed
-        if ok is not False: fx.acid_cutoff(c); _open.pop('cut', None)
+        if ok and alive(): fx.set_strip_map({1: 0.0})                # strip down only when the out completed (and is still the latest)
+        if ok is not False and alive(): fx.acid_cutoff(c); _open.pop('cut', None)
 def arp_in(level, alive):                                            # strip up, notes grow from short to their length, roll x4 on the last beat
     g, ok = _hold('gate', arp_gate()), None
     try:
         arp_gate(SHORT); fx.set_strip_map({6: level})
         ok = ramp(arp_gate, SHORT, g, fx.bars_secs(2) - fx.bars_secs(0.25), alive)
-        if ok:
+        if ok and alive() and not getp(ARP).get(R_ROLLBTN, 0.0):    # a held arp roll fill keeps its roll: no x4, no release
             roll(4)
             try: time.sleep(fx.bars_secs(0.25))
             finally: roll(None)
     finally:
-        if ok is not False: arp_gate(g); _open.pop('gate', None)
+        if ok is not False and alive(): arp_gate(g); _open.pop('gate', None)
 def arp_out(alive):
     cur = arp_gate(); g, ok = _hold('gate', cur), None
     try: ok = ramp(arp_gate, cur, SHORT, fx.bars_secs(2), alive)
     finally:
-        if ok: fx.set_strip_map({6: 0.0})
-        if ok is not False: arp_gate(g); _open.pop('gate', None)
+        if ok and alive(): fx.set_strip_map({6: 0.0})
+        if ok is not False and alive(): arp_gate(g); _open.pop('gate', None)
 ENTRY = {'acid in/out': (acid_in, acid_out), 'arp in/out': (arp_in, arp_out)}   # bank 2 moves: (in, out)

@@ -94,9 +94,21 @@ try:
     fx.acid_cutoff = cutoff; assert sent[-1] == ('cut', 0.4) and synths._open == {}, sent
     sent.clear(); synths.arp_in(0.5, lambda: True); g = [v[19] for k, v in sent if k == synths.ARP and 19 in v]        # arp in: short -> 0.6, roll x4 released
     assert g[0] == 0.05 and g[-1] == 0.6 and (synths.ARP, {20: 4.0, 21: 1.0}) in sent and (synths.ARP, {21: 0.0}) in sent and synths._open == {}, sent
+    rig['cut'] = 0.4; synths._open.clear(); sent.clear()                     # out reaches its end, but a newer press came in on the last step:
+    synths.acid_out(lambda: rig['cut'] > 0.05 + 1e-9)                          # no strip down, no cutoff restore, _open kept for the newer one
+    assert not any(k == 'strip' for k, _ in sent) and sent[-1][0] == 'cut' and abs(sent[-1][1] - 0.05) < 1e-9 and synths._open == {'cut': 0.4}, sent
+    live = [True]                                                            # arp_in cut off during its roll: lets go of its own roll x4,
+    synths.setp = lambda mid, vals: (sent.append((mid, dict(vals))), vals.get(21) == 1.0 and live.__setitem__(0, False))   # then no gate write
+    synths._open.clear(); sent.clear(); synths.arp_in(0.5, lambda: live[0]); i = sent.index((synths.ARP, {20: 4.0, 21: 1.0}))
+    assert sent[i + 1:] == [(synths.ARP, {21: 0.0})] and synths._open == {'gate': 0.6}, sent
+    synths.setp = lambda mid, vals: sent.append((mid, dict(vals)))
+    rig[synths.ARP][21] = 1.0; synths._open.clear(); sent.clear(); synths.arp_in(0.5, lambda: True)   # arp roll fill held: no x4, no release
+    assert not any(k == synths.ARP and 21 in v for k, v in sent) and synths._open == {}, sent
+    del rig[synths.ARP][21]
 finally:
     for k, v in real.items(): setattr(synths, k, v)
     for k, v in real_fx.items(): setattr(fx, k, v)
     synths._open.clear()
-print('Synths offline: auto_step mutate/next/undo + first-of-song + acid error keeps arp, hold-button release, octjump at 4, ramp cut-off, cancelled acid_out writes nothing after, acid_in floor 0.5, exception restores open, arp_in roll')
+print('Synths offline: auto_step mutate/next/undo + first-of-song + acid error keeps arp, hold-button release, octjump at 4, ramp cut-off, cancelled acid_out writes nothing after, acid_in floor 0.5, exception restores open, arp_in roll,'
+      ' finished out after a newer press writes nothing, arp_in cut off in its roll writes no gate, held arp roll left alone')
 print('ok')

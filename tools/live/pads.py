@@ -41,6 +41,7 @@ SYN = lambda: bool(sections.PAGES[state['page']].get('synth'))    # the Synths p
 SP = lambda: state['song']                                        # the song the moves act on: the song page last shown
 HOLD = ('fill', 'roll', 'octjump')                                # Synths pads that act while held (a page click toggles)
 HOLDL = threading.RLock()                                        # hold on / let go one at a time (RLock: synth_act calls let_go)
+ELOCK = threading.Lock()                                         # acid / arp entry: generation bump + direction, and a run's end check
 ARROWS = {93: -1, 94: 1}                                         # top row: left / right arrow (programmer mode CC)
 MACHINE_CC = 29                                                  # right column, round button at the end of the drums row
 def machine():                                                  # My lil Drums on / off, apart from the tracked drums (stem row)
@@ -158,22 +159,27 @@ def fx_act(name):
     elif name in fx.STRIP_TOGGLE:                                  # in / out; lit = in. Out remembers the level, in puts it back
         k, dflt = fx.STRIP_TOGGLE[name]; cur = fx.strips()[k]
         if name in synths.ENTRY:                                   # acid / arp come in and go out melodically over 2 bars (synths.ENTRY)
-            g = state['egen'][name] = state['egen'].get(name, 0) + 1; alive = lambda: state['egen'][name] == g   # per voice: only a newer
-            go_in, go_out = synths.ENTRY[name]                     # press of this move cancels it; the cancelled run hands the knob over
-            was = state['edir'].get(name)                          # a run still in flight: this press reverses it (during an out ramp
-            out_ = was == 'in' if was else cur > 0.001             # the strip is still up, so the strip alone would say "out" again)
+            with ELOCK:
+                g = state['egen'][name] = state['egen'].get(name, 0) + 1; alive = lambda: state['egen'][name] == g   # per voice: only a newer
+                go_in, go_out = synths.ENTRY[name]                 # press of this move cancels it; the cancelled run hands the knob over
+                was = state['edir'].get(name)                      # a run still in flight: this press reverses it (during an out ramp
+                out_ = was == 'in' if was else cur > 0.001         # the strip is still up, so the strip alone would say "out" again)
+                state['edir'][name] = 'out' if out_ else 'in'
             def run(fn, *a):
                 try: fn(*a)
                 except Exception: LOG.write(traceback.format_exc())
                 finally:
-                    if state['egen'][name] == g: state['edir'].pop(name, None)   # a cancelled run leaves the newer run's direction alone
-            state['edir'][name] = 'out' if out_ else 'in'
+                    with ELOCK:
+                        if state['egen'][name] == g: state['edir'].pop(name, None)   # a cancelled run leaves the newer run's direction alone
+            if name == 'acid in/out' and 'acid sweep' in state['fx']: release('acid sweep')   # one owner of the cutoff: the sweep snaps back first
             if out_:
                 if cur > 0.001: state['saved'][name] = cur
                 state['fx'].discard(name); threading.Thread(target=run, args=(go_out, alive), daemon=True).start()
             else: state['fx'].add(name); threading.Thread(target=run, args=(go_in, state['saved'].get(name, dflt), alive), daemon=True).start()
         elif cur > 0.001: state['saved'][name] = cur; fx.set_strip_map({k: 0.0}); state['fx'].discard(name)
         else: fx.set_strip_map({k: state['saved'].get(name, dflt)}); state['fx'].add(name)
+    elif name == 'acid sweep' and 'acid in/out' in state['edir']:   # an acid entry owns the cutoff while it ramps
+        LOG.write(time.ctime() + ' acid sweep ignored: acid in/out still ramping\n')
     elif name == 'acid sweep':                                    # Acid cutoff up over SWEEP_SECS; press again = snap back
         state['agen'] += 1; g = state['agen']
         if name in state['fx']: release(name)
@@ -301,11 +307,13 @@ threading.Thread(target=_scale, daemon=True).start()           # the arp's keys 
 try: inp = lp(mido.get_input_names(), 'LPMiniMK3 MIDI'); inp = inp and mido.open_input(inp, callback=on_msg)
 except Exception as e: inp = None; LOG.write(time.ctime() + f' launchpad input open failed: {e}; the 5 s refresh retries\n')
 def auto_loop():                                                # phrase auto-change: one small move per phrase per enabled voice
-    while not os.path.exists(STOP):                             # (roughly bar-aligned: the Acid takes a pattern at its pattern end,
-        t0 = time.time()                                        # the arp a change on its next step)
-        try: secs = fx.bars_secs(state['phrase'])
+    t0 = time.time()                                            # (roughly bar-aligned: the Acid takes a pattern at its pattern end,
+    while not os.path.exists(STOP):                             # the arp a change on its next step)
+        try: secs = fx.bars_secs(state['phrase'])               # absolute grid: a slow step does not push the next phrase later
         except Exception: secs = 16.0
-        while time.time() - t0 < secs and not os.path.exists(STOP): time.sleep(0.25)
+        t0 += secs
+        if t0 < time.time(): t0 = time.time()                    # missed a whole phrase (Rack stalled): fire now, grid from here
+        while time.time() < t0 and not os.path.exists(STOP): time.sleep(0.25)
         if state['auto'] and not state['held'] and not state['busy'] and 'dnb' not in state['fx']:
             try:
                 did = synths.auto_step(SP(), set(state['auto']))
