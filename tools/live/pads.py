@@ -251,9 +251,8 @@ def vox_up(note):                                               # Launchpad note
     except Exception: LOG.write(traceback.format_exc())         # off failed: still held, a press / clean tries again
     LOG.write(time.ctime() + f" vox {note} up -> held {sorted((n, x[1]) for n, x in list(state['vox'].items()))}\n"); paint()
 CLEANL = threading.Lock()                                        # two quick cleans: one after the other
-def side(note, hw):                                             # vox holds + clean: own thread, past busy (never dropped), busy untouched
-    try:
-        name = MOVES()[note]
+def side(note, name, hw):                                       # vox holds + clean: own thread, past busy (never dropped), busy untouched;
+    try:                                                         # name = the move pressed (a bank flip before the thread runs changes nothing)
         if name in fx.VOX_STUT: vox(note, name, hw)              # HOLDL serialises the writes
         else:
             with CLEANL: fx_act(name)
@@ -306,8 +305,9 @@ def act(note, hw=False):
 def press(note, hw=False):                                      # hardware pad (hw) or a click on the page (board.py): same path
     if not (pad(note) or note in MOVES() or (SYN() and note in synths.pads(SP()))): return False
     led(note, 3); led(note, 3, ch=1)
-    if MOVES().get(note) in fx.VOX_STUT or MOVES().get(note) == 'clean':   # a hold / its slide / the panic button: never dropped by busy
-        threading.Thread(target=side, args=(note, hw), daemon=True).start(); return True
+    mv = MOVES().get(note)
+    if mv in fx.VOX_STUT or mv == 'clean':                       # a hold / its slide / the panic button: never dropped by busy
+        threading.Thread(target=side, args=(note, mv, hw), daemon=True).start(); return True
     if state['busy']: return False
     state['busy'] = True; threading.Thread(target=act, args=(note, hw), daemon=True).start(); return True
 def on_msg(msg):

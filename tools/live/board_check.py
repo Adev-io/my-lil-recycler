@@ -172,6 +172,13 @@ try:                                                                            
     fx.vox_on(st, 13, 'vox 1/8', A, False); assert vs == [(A, 1), (A, None)] and st['vox'] == {}, vs   # click again: off
     vs.clear(); hw_on(12, 0); hw_on(14, 1); fx.vox_clean(st); assert vs[2:] and sorted(vs[2:], key=str) == sorted([(A, None), (B, None)], key=str) and st['vox'] == {}, vs   # clean: both decks
     assert not hw_off(12) and not hw_off(14) and len(vs) == 4, vs                   # pads come up after clean: nothing more sent
+    vs.clear(); hw_on(12, 0); hw_on(13, 0); hw_on(12, 0)                          # Launchpad re-press of a held pad (missed note off): never off,
+    assert vs == [(A, 0), (A, 1), (A, 1)] and list(st['vox']) == [12, 13], vs      # the hold re-asserted at the length playing (1/8)
+    fx.vox_on(st, 13, 'vox 1/8', A, False); assert vs[-1] == (A, 0) and list(st['vox']) == [12], vs   # a page click still toggles (back to 1/4)
+    hw_off(12); assert vs[-1] == (A, None) and st['vox'] == {}, vs
+    vs.clear(); fx.vox_on(st, 14, 'vox 1/16', A, False); hw_on(14, 0)              # page-held pad pressed on the Launchpad: re-asserted, not off
+    assert vs == [(A, 2), (A, 2)] and st['vox'] == {14: (A, 'vox 1/16', False)}, vs
+    fx.vox_on(st, 14, 'vox 1/16', A, False); st['down'].discard(14); assert vs[-1] == (A, None) and st['vox'] == {}, vs
     def boom(d, div):
         if div is None: raise RuntimeError('no rig')
         vs.append((d, div))

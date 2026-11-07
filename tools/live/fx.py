@@ -119,7 +119,11 @@ def vox_stut(deck, div):                                           # div None = 
     S.call('vcvrack_set_params', {'moduleId': deck, 'params': [{'id': STUT + VOX_SLOT, 'value': 0.0}] if div is None else
                                   [{'id': STUTLEN, 'value': float(div)}, {'id': STUT + VOX_SLOT, 'value': 1.0}]})
 def vox_on(state, note, name, deck, hw):                           # a press: hold (another vox pad held on that deck = slide, no let go)
-    if note in state['vox']: return vox_off(state, note)           # a held pad again (a page click) = let go
+    if note in state['vox']:
+        if not hw: return vox_off(state, note)                     # a held pad clicked again on the page = let go
+        d = state['vox'][note][0]                                  # a Launchpad re-press never flips it off: the hold re-asserted at the
+        same = [x[1] for x in list(state['vox'].values()) if x[0] == d]   # length playing now (the latest pad held on that deck)
+        vox_stut(d, VOX_STUT[same[-1]]); return True
     state['vox'][note] = (deck, name, hw)                          # recorded before the write: a false 'held' is safe to let go, a false
     try: vox_stut(deck, VOX_STUT[name])                            # 'not held' is not (a failed write stays held + lit and raises)
     finally:
