@@ -107,7 +107,7 @@
     <p class="tag">Arturia MiniLab 3</p>
     <div class="ml">
       <div class="top">
-        <div><h2><span id="mltitle">MiniLab 3</span><span class="modes" id="modes"><button data-mode="mix">drums + mix</button><button data-mode="acid">acid bass</button></span></h2><div class="knobs" id="knobs"></div></div>
+        <div><h2><span id="mltitle">MiniLab 3</span><span class="modes" id="modes"><button data-mode="mix">drums + mix</button><button data-mode="acid">synths</button></span></h2><div class="knobs" id="knobs"></div></div>
         <div><h2><span>faders</span></h2><div class="faders" id="faders"></div></div>
       </div>
       <div class="pads" id="mpads"></div>
@@ -229,7 +229,7 @@ function buildMinilab(M) {
       `<div class="keylbl">keys: ${M.keys}</div>`;
 }
 async function setMode(m) {
-  flashBanner(`switching the MiniLab to ${m === 'acid' ? 'Acid Bass' : 'drums + mix'}…`); await post('/mode', { mode: m }); poll(); }
+  flashBanner(`switching the MiniLab to ${m === 'acid' ? 'Synths' : 'drums + mix'}…`); await post('/mode', { mode: m }); poll(); }
 document.querySelectorAll('#modes button').forEach(b => b.onclick = () => setMode(b.dataset.mode));
 function updateMinilab(M) {
   document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle(b.classList.contains('round') ? 'lit' : 'on', b.dataset.mode === M.mode));

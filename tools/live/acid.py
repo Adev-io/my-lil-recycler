@@ -1,4 +1,4 @@
-# MiniLab 3 -> My lil Acid Bass only (replaces minilab.py while it runs: Windows lets one program hold the MiniLab).
+# MiniLab 3 -> My lil Acid Bass + the arp's gate + Triple's cutoff (Synths mode) (replaces minilab.py while it runs: Windows lets one program hold the MiniLab).
 # Keys: play the bass live (forwarded to 'loopMIDI Port 1' -> Rack MIDI to CV -> Acid Bass Play ins; acid_add.py patched it).
 #   One octave down (middle C plays C2). Hold a key into the next = slide. Hit hard (velocity >= ACC_VEL) = accent.
 #   While a key is held the sequencer stops; it starts again RESUME s after the last key is let go (back in step with the clock).
@@ -77,7 +77,7 @@ if os.path.exists(MLSTOP): os.remove(MLSTOP)
 if inp is None: log('MiniLab not available (still held by minilab.py?)'); sys.exit(1)
 open(os.path.join(here, 'minilab.mode'), 'w').write('acid')      # the page labels the MiniLab for this program
 refresh(); threading.Thread(target=loop, daemon=True).start()
-log('start: keys play, pads = patterns, faders cutoff/res/env/decay')
+log('start: keys play the bass, pads = acid patterns, faders cutoff/res/env/decay, knobs incl. arp gate / brightness / transpose')
 while not os.path.exists(STOP): time.sleep(0.25)
 inp.close()
 for n in list(held): out.send(mido.Message('note_off', note=n))
