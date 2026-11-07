@@ -106,6 +106,6 @@ inp.close()
 for n in list(held): out.send(mido.Message('note_off', note=n))
 try: S.call('vcvrack_set_params', {'moduleId': ACID, 'params': [{'id': 25, 'value': 1.0}]})   # sequencer back on
 except Exception as e: log(f'stop: sequencer back on failed ({str(e)[:80]})')
+log('stopped')                                 # before acid.stop goes: pads.py's log-growth wait must not take this line for the new program's
 try: os.remove(STOP)
 except OSError: pass
-log('stopped')

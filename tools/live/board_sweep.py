@@ -61,6 +61,7 @@ try:
     for d in (S.A, S.B, C): S.call('vcvrack_set_params', {'moduleId': d, 'params': [{'id': 14 + k, 'value': 0.0} for k in range(4)]})
     time.sleep(6)                                                                # pads.py re-reads the rig: every row dark
     for pg, P in enumerate(get()['launchpad']['pages']):
+        if S.PAGES[pg].get('synth'): continue                                    # Synths page: action pads, no samples
         page(pg)
         for row in get()['launchpad']['rows']:
             r = S.PAGES[pg]['rows'][row['base']]; deck, slot = r.get('deck', S.A), r['slot']
@@ -155,6 +156,7 @@ try:
             check(f'MiniLab {tag} cc {cc} {label}', label == ctl['label'] and near(a, f(0), tol) and near(b, f(127), tol) and near(c, f(back), tol),
                   f'{round(v0, 3)}: 0 -> {round(a, 3)} (want {f(0)}), 127 -> {round(b, 3)} (want {f(127)}), back {round(c, 3)}')
     for pg in range(len(L0['pages'])):
+        if S.PAGES[pg].get('synth'): continue                                    # the mix map follows songs only
         page(pg); time.sleep(0.5); sweep_ccs(f'mix page {pg + 1}', maps.mix_map(pg))
     page(0)
 

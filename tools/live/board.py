@@ -23,8 +23,13 @@ def mode():
     return m if m in maps.MODES else 'acid'
 def launchpad():
     pg = ST['page']; on = ST['on'][pg]
-    rows = [dict(name=r['name'], base=b, color=r['color'], labels=maps.pad_labels(r['samples']), on=on.get(b))
-            for b, r in sorted(S.PAGES[pg]['rows'].items(), reverse=True)]
+    if S.PAGES[pg].get('synth'):                                    # Synths page: action pads, several lit per row
+        import synths; P = synths.pads(ST['song']); lit = ST['slit'] | ST['held']
+        rows = [dict(name=n, base=b, color=c, labels=[P[b + i][0] if b + i in P else '' for i in range(8)], on=None,
+                     lit=[i for i in range(8) if b + i in lit]) for b, (n, c) in sorted(synths.ROWS.items(), reverse=True)]
+    else:
+        rows = [dict(name=r['name'], base=b, color=r['color'], labels=maps.pad_labels(r['samples']), on=on.get(b))
+                for b, r in sorted(S.PAGES[pg]['rows'].items(), reverse=True)]
     bank = ST['bank']
     return dict(rows=rows, page=pg, pages=[p['name'] for p in S.PAGES], bank=bank, banks=len(fx.BANKS), machine=ST['machine'],
                 fx=[dict(note=n, name=nm, on=nm in ST['fx']) for n, nm in sorted(fx.BANKS[bank].items())],

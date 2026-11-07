@@ -4,6 +4,7 @@ for pg in S.PAGES:
     for b, r in sorted(pg['rows'].items(), reverse=True):
         l = maps.pad_labels(r['samples']); assert len(l) == len(r['samples']) and all(l), (r['name'], l); print(f'{pg["name"][:7]} {r["name"]:12s}', l)
         assert all(b + i <= b + 7 for i in range(len(l))), (r['name'], 'more than 8 pads')
+assert S.PAGES[2]['synth'] and not S.PAGES[2]['rows'] and S.PAGES[2]['name'] == 'Synths', S.PAGES[2]   # page 3: Synths, no sample rows
 assert maps.pad_labels(S.ROWS_TOOM[71]['samples'])[:2] == ['05 verse', '02 verse']
 assert maps.pad_labels(S.ROWS[81]['samples']) == ['14 chop', '14'], maps.pad_labels(S.ROWS[81]['samples'])
 assert maps.pad_labels(S.ROWS[31]['samples'])[:3] == ['strings 08', 'strings 13', 'full 08']

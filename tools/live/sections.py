@@ -106,6 +106,7 @@ SCALES = {0: (1, 2, 4, 6, 7, 9, 11), 1: (1, 2, 4, 6, 7, 9, 11)}
 # the arp scale; 11, 12, 13, 17, 18 fall outside it and are dropped. The vamps stay first though outside too (10 has G# + A#,
 # 14 has A#: chromatic passing notes against D major).
 ACID_SONG = {0: [10, 8, 9], 1: [14, 15, 16, 19]}
+PAGES.append(dict(name='Synths', rows={}, synth=True))   # page 3: arp + acid controls (synths.py); moves act on the song last shown
 def base():                                                    # deck A + deck B strips; deck A slots without a row silent
     mix = {p['id']: p['value'] for p in json.loads(call('vcvrack_get_params', {'moduleId': MIX}))}
     if mix[3] < 0.05:                                          # deck B was closed: its page starts silent, then the strip opens

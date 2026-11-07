@@ -171,6 +171,7 @@ function updateLaunchpad(L) {
   document.querySelectorAll('.arrow').forEach(b => { const p = L.page + +b.dataset.dir, ok = p >= 0 && p < L.pages.length;
     b.classList.toggle('lit', ok); b.disabled = !ok; b.title = ok ? `to page ${p + 1}: ${L.pages[p]}` : 'no page that way'; });
   const on = new Set(L.rows.filter(r => r.on !== null && r.on !== undefined).map(r => r.base + r.on));
+  L.rows.forEach(r => (r.lit || []).forEach(i => on.add(r.base + i)));   // Synths page: several lit pads per row
   L.fx.filter(f => f.on).forEach(f => on.add(f.note));
   document.querySelectorAll('.pad[data-color]').forEach(b => b.classList.toggle('on', on.has(+b.dataset.note)));
   document.querySelectorAll('.machine').forEach(b => b.classList.toggle('lit', !!L.machine));
