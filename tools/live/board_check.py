@@ -34,4 +34,12 @@ try:
 finally: synths.S.call = real_call
 assert maps.ACID[77][:2] == (synths.ARP, 19) and maps.ACID[18][:2] == (synths.TRI, 28) and maps.ACID[16][:2] == (S.ACID, 28), 'Synths map'
 assert maps.ACID[16][2](0) == -12.0 and maps.ACID[16][2](127) == 12.0 and maps.MODES['acid']['title'] == 'Synths'
+for song in (0, 1):                                                          # Synths page pads (phase 3)
+    P = synths.pads(song)
+    assert all(n // 10 * 10 + 1 in synths.ROWS and 1 <= n % 10 <= 8 for n in P), sorted(P)
+    assert all(l.isascii() and len(l) <= 12 for l, *_ in P.values()), [l for l, *_ in P.values()]
+    assert all(0 <= v <= 31 for v in S.ACID_SONG[song]) and S.ACID_SONG[song][0] == (10, 14)[song]
+    assert {k for _, k, _ in P.values()} == {'pattern', 'mutate', 'undo', 'keep', 'transpose', 'fill', 'roll', 'octjump', 'dir', 'oct', 'int', 'auto', 'phrase'}
+assert [k for _, k in synths.ACID_RULE] == ['mutate', 'next', 'undo'] and synths.ACID_RULE[-1][0] == 1.0
+assert set(synths.ENTRY) == {'acid in/out', 'arp in/out'}
 print('ok')

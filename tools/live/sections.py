@@ -102,6 +102,10 @@ ROWS_TOOM = {
 PAGES = [dict(name='Lowdown', rows=ROWS), dict(name='Time Out Of Mind', rows=ROWS_TOOM)]
 # Arp keys per song page (pitch classes, C = 0). scale_scan.py 2026-11-06: both songs' bass sits in D major (D E F# G A B C#).
 SCALES = {0: (1, 2, 4, 6, 7, 9, 11), 1: (1, 2, 4, 6, 7, 9, 11)}
+# Acid patterns per song for the Synths page row 8 and phrase auto-change. acid_slots.py 2026-11-06: 8, 9, 15, 16, 19 sit inside
+# the arp scale; 11, 12, 13, 17, 18 fall outside it and are dropped. The vamps stay first though outside too (10 has G# + A#,
+# 14 has A#: chromatic passing notes against D major).
+ACID_SONG = {0: [10, 8, 9], 1: [14, 15, 16, 19]}
 def base():                                                    # deck A + deck B strips; deck A slots without a row silent
     mix = {p['id']: p['value'] for p in json.loads(call('vcvrack_get_params', {'moduleId': MIX}))}
     if mix[3] < 0.05:                                          # deck B was closed: its page starts silent, then the strip opens
