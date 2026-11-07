@@ -28,6 +28,7 @@ changed files. The cache is shared by every Recycler you have.
 | **BARS** | Loop length: 1, 2, 4 or 8 bars (click to step; the tooltip shows which). |
 | **RUN** / RUN gate | Start and stop. A patched gate overrides the button. The light shows running. |
 | **RESET** | Back to the top of the loop. With a clock patched, on the next pulse. |
+| **STUT LEN** | The slice a held STUT repeats: 1/4, 1/8, 1/16 or 1/32 bar. One knob, shared by all four slots: see [STUT](#stut). |
 
 Changing tempo, root, mode or bars re-renders the stems after a short pause (0.2 s of no change). Until the new
 renders land, the old ones keep playing in time. Tempo wobble under 1 % is ignored. The **RENDER** light blinks
@@ -135,7 +136,9 @@ START and REV).
 - START and REV still apply: a reversed slot stutters its reversed audio.
 - Turn STUT LEN while holding and the slot jumps onto the new grid where the song is now, with no gap (a slide from 1/4
   to 1/8 keeps going).
-- A new file landing while you hold stutters from its own grid point.
+- A new file landing while you hold stutters from its own grid point; so does a RESET (or a clock jump), and a restart
+  after a stop lands on the beat.
+- STUT LEN is one knob for all four slots.
 - A hold is never saved: a patch always loads with STUT up. Patches from 2.3 and older load with STUT LEN at 1/8.
 
 ## Right-click menu
