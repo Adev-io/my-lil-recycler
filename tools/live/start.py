@@ -1,6 +1,6 @@
 # Session start in one shot: Rack on dj-set.vcv, wait for the My lil MCP server, (re)start pads.py at a section.
 # usage: py -3 start.py [section=0]
-import os, subprocess, sys, time
+import os, re, subprocess, sys, time
 here = os.path.dirname(os.path.abspath(__file__))
 exec(open(os.path.join(here, 'rack.py')).read().split('if sys.argv[1]')[0])
 RACK = r'C:\Program Files\VCV\Rack2Free\Rack.exe'
@@ -9,7 +9,11 @@ PYW = r'C:\Users\Arikl\AppData\Local\Programs\Python\Python311\pythonw.exe'     
 STOP, LOG = os.path.join(here, 'pads.stop'), os.path.join(here, 'pads.log')
 ps = lambda cmd: subprocess.run(['powershell', '-NoProfile', '-Command', cmd], capture_output=True, text=True).stdout.split()
 rack_up = lambda: bool(ps("(Get-Process Rack -ErrorAction SilentlyContinue).Id"))
-pads_pids = lambda: ps("Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe'\" | Where-Object CommandLine -match 'pads(_keep)?[.]py' | ForEach-Object ProcessId")   # pads.py + its pads_keep.py supervisor
+OURS = re.compile(r'(^|[\\/" ])pads(_keep)?[.]py("|\s|$)')          # pads.py / pads_keep.py as a whole token: not launchpads.py, notepads.py
+def pads_pids():                                              # pads.py + its pads_keep.py supervisor; the match is done here, not in PowerShell quoting
+    out = subprocess.run(['powershell', '-NoProfile', '-Command', "Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe'\" | ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }"],
+                         capture_output=True, text=True).stdout.splitlines()
+    return [l.split('\t', 1)[0] for l in out if '\t' in l and OURS.search(l.split('\t', 1)[1])]
 if rack_up(): print('Rack already running (plain launch restores the autosave; fine if it was dj-set.vcv)')
 else: subprocess.Popen([RACK, PATCH]); print('Rack launched on', os.path.basename(PATCH))
 for i in range(120):                                          # the MCP answers only once the audio engine runs (interface present)
@@ -19,11 +23,14 @@ else: sys.exit('\nMCP never answered in 120 s: Yamaha off? (no audio device = id
 print(f'\nMCP up after {i} s')
 if pads_pids():
     open(STOP, 'w').close()
-    for _ in range(40):
-        if not pads_pids(): break
+    t, empty = time.time(), 0
+    while time.time() - t < 10:                               # wall-clock deadline (each query takes ~1 s); two empty reads in a row = gone, not a failed query
+        empty = 0 if pads_pids() else empty + 1
+        if empty >= 2: break
         time.sleep(0.25)
     else:                                                     # still up after 10 s: kill, or the supervisor outlives pads.stop and two would run
-        ps('Stop-Process -Force -Id ' + ','.join(pads_pids())); time.sleep(1)
+        left = pads_pids()
+        if left: ps('Stop-Process -Force -Id ' + ','.join(left)); time.sleep(1)
     print('old pads.py stopped')
 if os.path.exists(STOP): os.remove(STOP)                      # only now: the old supervisor has seen it and gone
 n = len(open(LOG, encoding='utf-8', errors='replace').readlines()) if os.path.exists(LOG) else 0
