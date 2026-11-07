@@ -3,11 +3,12 @@
 # Row 8 (fx.FX) = transition moves; a toggled move blinks blue, pressing it again releases it. The moves row is on every page.
 # Bank 3 vox 1/4 .. 1/32 = Recycler STUT on the vocals of the song on show, held while the pad is down (a page click toggles).
 # Top-row Drums / Keys / User buttons (CC 96/97/98) = MiniLab program: drums + mix map (minilab.py) / Synths (acid.py) /
-# Acid Env (acid.py env: filter + amp ADSR).
+# Acid Env (acid.py env: filter + amp ADSR). Top-row Session button (CC 95) = drum machine (My lil Drums) on / off, lit yellow = on.
 # Top-row arrows left/right (CC 93/94) = previous/next page (sections.PAGES: 1 Lowdown, 2 Time Out Of Mind, 3 Synths). A page turn changes
 # only the pads, never the sound; each page remembers what its rows play. Lit arrow = there is a page that way.
-# Right column round button at a row's end (CC row base + 8, e.g. 89 = vocals) = that row's sample page 1 / 2 (sections row 'samples2'),
-# pads only; lit in the row colour on page 2, dim on page 1, dark on rows without a page 2. A pad is lit only if its sample is the one playing.
+# Right column round button at a row's end (CC row base + 8, 29 drums .. 89 vocals) = that row's next pad page (sections.pages: samples,
+# samples2, then chop pages = 4-bar A/B halves from chops.json), wrapping to the first; pads only. Dim on page 1, row colour on samples2,
+# row colour pulsing on a chop page, dark on rows with one page. A pad is lit only if its sample is the one playing.
 # Page 3 Synths (synths.py): acid patterns / moves, held fills, arp dir / oct / interval, auto change; the moves row acts on the song last shown.
 # MIDI only plus one MCP batch per press; sections.py and fx.py are reloaded per press. Stops when pads.stop exists. Log: pads.log.
 import os, sys, time, threading, traceback, importlib, subprocess, mido
@@ -18,7 +19,7 @@ import sections, fx, synths
 STOP = os.path.join(here, 'pads.stop')
 state = {'on': [{} for _ in sections.PAGES], 'page': 0, 'busy': False, 'fx': set(), 'gen': 0, 'dgen': 0, 'snap': None, 'hw': False, 'swept': [], 'tgen': 0, 'hush': {}, 'bank': 0, 'saved': {}, 'agen': 0, 'machine': True, 'fgen': 0, 'fading': False, 'acts': 0,
          'song': 0, 'held': set(), 'auto': set(), 'phrase': 8, 'egen': {}, 'edir': {}, 'slit': set(), 'down': set(), 'vox': {},   # egen / edir: per entry move (acid, arp); vox: fx.vox_on
-         'rowpage': {}, 'path': [{} for _ in sections.PAGES]}   # rowpage: (page, row) -> 1 = row page 2 on show; path: per page row -> sample playing
+         'rowpage': {}, 'path': [{} for _ in sections.PAGES]}   # rowpage: (page, row) -> row page on show (sections.pages index); path: per page row -> sample playing
 HUSH = {'drums only': (1, 2, 3, 5, 6), 'no drums': (0, 4)}       # Mixer strips each move silences: drums only = Acid, decks A/B,
                                                                  # Acid Voice, Triple; no drums = My lil Drums + the drum stem
 lp = lambda names, pre: next((x for x in names if x.startswith(pre)), None)        # Launchpad unplugged -> page only
@@ -32,7 +33,7 @@ def park_or_close(port, gone=None):                              # gone: its dev
     except Exception: pass
     if gone is None:
         try: gone = port.name not in (mido.get_input_names() if port.is_input else mido.get_output_names())
-        except Exception: gone = False
+        except Exception: gone = True                            # lookup failed: treat as gone (never close on a guess)
     if gone: _dead.append(port); return
     try: port.close()
     except Exception: _dead.append(port)
@@ -60,19 +61,20 @@ HOLD = ('fill', 'roll', 'octjump')                                # Synths pads 
 HOLDL = threading.RLock()                                        # hold on / let go one at a time (RLock: synth_act calls let_go)
 ELOCK = threading.Lock()                                         # acid / arp entry: generation bump + direction, and a run's end check
 ARROWS = {93: -1, 94: 1}                                         # top row: left / right arrow (programmer mode CC)
-MACHINE_CC = 29                                                  # right column, round button at the end of the drums row
-ROW_CC = {b + 8: b for b in range(31, 91, 10)}                 # right column round buttons at the end of rows 3-8 (CC 39..89; 19 / 29 taken)
+MACHINE_CC = 95                                                  # top row Session button: drum machine on / off
+ROW_CC = {b + 8: b for b in range(21, 91, 10)}                 # right column round buttons at the end of rows 2-8 (CC 29..89; 19 = moves bank)
 L = lambda pg, b: sections.cur(sections.PAGES[pg]['rows'][b], state['rowpage'].get((pg, b), 0))   # a row's sample list on show
 RP = lambda pg: {b: state['rowpage'].get((pg, b), 0) for b in sections.PAGES[pg]['rows']}         # row pages of a page, for sections.now
-def rowflip(b):                                                 # a row's round button: its sample page 1 <-> 2 (pads only, never the sound)
+def rowflip(b):                                                 # a row's round button: its next pad page, last -> first (pads only, never the sound)
     pg = state['page']; r = None if SYN() else R().get(b)
-    if not (r and r.get('samples2')) or state['busy']: return False
+    n = len(sections.pages(r)) if r else 0
+    if n < 2 or state['busy']: return False
     on, old = state['on'][pg], L(pg, b); i = on.get(b); was = state['path'][pg].get(b)
     p = old[i] if i is not None and i < len(old) else (None if was in old else was)   # nothing lit + the remembered sample on this list = muted
-    state['rowpage'][(pg, b)] = 1 - state['rowpage'].get((pg, b), 0); new = L(pg, b)
+    k = state['rowpage'].get((pg, b), 0); state['rowpage'][(pg, b)] = k = (k + 1) % n if k < n else 0; new = L(pg, b)   # (fewer pages now: back to 1)
     on[b] = new.index(p) if p in new else None; state['path'][pg][b] = p   # lit only if the sample playing is on the list now shown
     state['acts'] += 1                                           # a 5 s refresh read during the flip is stale
-    LOG.write(time.ctime() + f" {r['name']} row page {state['rowpage'][(pg, b)] + 1}\n"); paint(); return True
+    LOG.write(time.ctime() + f" {r['name']} row page {k + 1}/{n} {sections.kind(r, k)}\n"); paint(); return True
 def machine():                                                  # My lil Drums on / off, apart from the tracked drums (stem row)
     import maps; state['machine'] = maps.drum_machine(); LOG.write(time.ctime() + f" drum machine {'on' if state['machine'] else 'off'}\n"); paint(); return state['machine']
 MOVES = lambda: fx.BANKS[state['bank']]                           # moves row: bank 1 (fx.FX) or bank 2 (fx.FX2), flipped by fx.BANK_CC
@@ -127,12 +129,15 @@ def paint():
     for n, name in MOVES().items():
         if name in state['fx'] or name in vl: led(n, 0); led(n, 45, ch=1)
         else: led(n, fx.COLOR)
-    cc_ = lambda c, v: lp_send(mido.Message('control_change', control=c, value=v))
+    cc_ = lambda c, v, ch=0: lp_send(mido.Message('control_change', channel=ch, control=c, value=v))
     cc_(fx.BANK_CC, fx.COLOR if state['bank'] else 1)           # lit = bank 2
     cc_(MACHINE_CC, 13 if state['machine'] else 1)              # yellow = machine on
-    for cc, b in ROW_CC.items():                                 # row page buttons: row colour = page 2, dim = page 1, dark = no page 2
-        r = None if SYN() else R().get(b)
-        cc_(cc, (r['color'] if state['rowpage'].get((state['page'], b)) else 1) if r and r.get('samples2') else 0)
+    for cc, b in ROW_CC.items():                                 # row page buttons: dim = page 1, row colour = samples2, pulsing row colour
+        r = None if SYN() else R().get(b)                        # (MIDI ch 3) = a chop page, dark = a row with one page
+        n = len(sections.pages(r)) if r else 0; k = state['rowpage'].get((state['page'], b), 0); k = k if k < n else 0
+        if n < 2: cc_(cc, 0)
+        elif sections.kind(r, k) == 'chop': cc_(cc, r['color'], 2)
+        else: cc_(cc, r['color'] if k else 1)
     for cc, d in ARROWS.items(): cc_(cc, 3 if 0 <= state['page'] + d < len(sections.PAGES) else 0)
     for cc, m in MODE_CC.items(): cc_(cc, 37 if mode_now() == m else 1)   # the MiniLab mode on show: lit cyan, the others dim
 def turn(d):                                                    # arrow: next / previous page (pads only)
@@ -163,7 +168,7 @@ def fx_act(name):
             state['fx'].discard(name)
             for d in state['swept']: fx.set_deck_filters(d, fx.BASEF[d])
         else:                                                     # only the song on show (page 1 Lowdown, page 2 TOOM)
-            decks = fx.song_decks(SP(), state['on'])
+            decks = fx.song_decks(SP(), state['path'])            # path: the drums row counts while it plays from any row page
             for d in set(state['swept']) - set(decks): fx.set_deck_filters(d, fx.BASEF[d])
             state['fx'] -= {'sweep up', 'sweep down'}; state['fx'].add(name); state['swept'] = decks
             threading.Thread(target=sweep, args=(fx.HP if name == 'sweep up' else fx.LP, state['gen'], decks), daemon=True).start()
@@ -324,7 +329,7 @@ def act(note, hw=False):
         if note in MOVES(): fx_act(MOVES()[note])                    # (vox holds + clean go through side(), never here)
         elif SYN(): synth_act(note, hw)
         else:
-            rows, on = R(), ON(); b, i = pad(note); r = rows[b]; pg0 = state['page']; Ls = L(pg0, b)   # the row's list on show (row page 1 or 2)
+            rows, on = R(), ON(); b, i = pad(note); r = rows[b]; pg0 = state['page']; Ls = L(pg0, b)   # the row's list on show (its row page: main, samples2 or chop halves)
             i = None if on.get(b) == i else i                          # lit pad again = mute the row
             p = Ls[i] if i is not None else None
             sections.play(r['slot'], p, r['level'], r.get('deck')); on[b] = i; state['path'][pg0][b] = p
@@ -357,7 +362,7 @@ def on_msg(msg):
     elif msg.type == 'control_change' and msg.value and msg.control == MACHINE_CC: threading.Thread(target=machine, daemon=True).start()
     elif msg.type == 'control_change' and msg.value and msg.control in ROW_CC: rowflip(ROW_CC[msg.control])
 open(os.path.join(here, 'page.txt'), 'w').write('0')
-try: sections.base(strips=not os.environ.get('PADS_RESPAWN')); state['on']   # pads_keep.py sets PADS_RESPAWN after a crash: leave the mixer as it is = [sections.now(p['rows'], RP(k), state['path'][k]) if p['rows'] else {} for k, p in enumerate(sections.PAGES)]
+try: sections.base(strips=not os.environ.get('PADS_RESPAWN')); state['on'] = [sections.now(p['rows'], RP(k), state['path'][k]) if p['rows'] else {} for k, p in enumerate(sections.PAGES)]   # pads_keep.py sets PADS_RESPAWN after a crash: leave the mixer as it is
 except Exception: LOG.write(traceback.format_exc())
 def _scale():
     try: synths.follow(SP)
@@ -385,50 +390,51 @@ LOG.write(time.ctime() + f" start rows {state['on']} fx row {list(fx.FX.values()
           f" page http://127.0.0.1:{board.PORT}\n")
 try: paint()
 except Exception: LOG.write(traceback.format_exc())
-t = time.time()
-while not os.path.exists(STOP):
-    time.sleep(0.25)
-    if time.time() - t > 5:                                      # re-read the rig: rows brought in or out elsewhere (MiniLab, page
-        stale = not out                                          # output lost = the USB / MIDI stack changed: the input is suspect too
-        if stale:                                                # reopen the output when it is back (failure = wait for the next refresh)
-            try:
-                nm = lp(mido.get_output_names(), 'MIDIOUT2 (LPMiniMK3')
-                if nm:
-                    new = mido.open_output(nm)                   # outside the lock; only the swap is inside
-                    with lock: out = new; state['hw'] = True
-                    LOG.write(time.ctime() + ' launchpad output back\n'); lp_send(PROG)
-                    try: paint()
-                    except Exception: LOG.write(traceback.format_exc())
-            except Exception: pass
-        try:                                                     # input: reopen when missing, when the output was lost, or when its name left the port list
-            names = mido.get_input_names()
-            if inp is None or stale or getattr(inp, 'name', None) not in names:
-                if inp is not None:
-                    park_or_close(inp, getattr(inp, 'name', None) not in names)   # never close a port whose device vanished
-                    inp = None; LOG.write(time.ctime() + ' launchpad input lost; retrying\n')
-                nm = lp(names, 'LPMiniMK3 MIDI')
-                if nm: inp = mido.open_input(nm, callback=on_msg); state['inp_err'] = None; LOG.write(time.ctime() + ' launchpad input back\n')
-        except Exception as e:
-            if state.get('inp_err') != str(e): state['inp_err'] = str(e); LOG.write(time.ctime() + f' launchpad input reopen failed: {e}\n')
-        try:                                                    # faders, Rack itself) light up or go dark on both pages too
-            n0 = state['acts']; paths = [{} for _ in sections.PAGES]
-            fresh = [sections.now(p['rows'], RP(k), paths[k]) if p['rows'] else {} for k, p in enumerate(sections.PAGES)]
-            if not state['busy'] and state['acts'] == n0: state['on'], state['path'] = fresh, paths   # a press / row flip during the read wins: that snapshot is stale
-            state['machine'] = next(x['value'] for x in sections.json.loads(sections.call('vcvrack_get_params', {'moduleId': sections.DRUMS})) if x['id'] == 5) > 0.001
-            cur = fx.strips()                                    # in/out moves lit by what the strips really are
-            for name, (k, _) in list(fx.STRIP_TOGGLE.items()) + ([('drums in/out', (4, 0))] if not state['fading'] else []):
-                if name in state['edir']: continue               # an entry still ramping: its press set the light (an out keeps the strip up)
-                state['fx'] = (state['fx'] | {name}) if cur[k] > 0.001 else (state['fx'] - {name})
-            if SYN(): state['slit'] = synths.lit(state)              # Synths page: lit by what the arp + acid really are (MiniLab, Rack)
-        except Exception: LOG.write(traceback.format_exc())
-        try: paint()
-        except Exception: LOG.write(traceback.format_exc())
-        t = time.time()
-park_or_close(inp); inp = None
-try:
-    with HOLDL: fx.vox_clean(state)                              # stopping: no vox stutter left held in Rack
-except Exception: LOG.write(traceback.format_exc())
-for n in range(11, 90): led(n, 0)
-with lock: o, out = out, None
-park_or_close(o)
-LOG.flush(); os._exit(0)                                         # no interpreter teardown: it would run __del__ (a second closePort) on parked ports
+try:                                                             # whatever ends the loop (an error too): no interpreter teardown
+    t = time.time()
+    while not os.path.exists(STOP):
+        time.sleep(0.25)
+        if time.time() - t > 5:                                      # re-read the rig: rows brought in or out elsewhere (MiniLab, page
+            stale = not out                                          # output lost = the USB / MIDI stack changed: the input is suspect too
+            if stale:                                                # reopen the output when it is back (failure = wait for the next refresh)
+                try:
+                    nm = lp(mido.get_output_names(), 'MIDIOUT2 (LPMiniMK3')
+                    if nm:
+                        new = mido.open_output(nm)                   # outside the lock; only the swap is inside
+                        with lock: out = new; state['hw'] = True
+                        LOG.write(time.ctime() + ' launchpad output back\n'); lp_send(PROG)
+                        try: paint()
+                        except Exception: LOG.write(traceback.format_exc())
+                except Exception: pass
+            try:                                                     # input: reopen when missing, when the output was lost, or when its name left the port list
+                names = mido.get_input_names()
+                if inp is None or stale or getattr(inp, 'name', None) not in names:
+                    if inp is not None:
+                        park_or_close(inp, getattr(inp, 'name', None) not in names)   # never close a port whose device vanished
+                        inp = None; LOG.write(time.ctime() + ' launchpad input lost; retrying\n')
+                    nm = lp(names, 'LPMiniMK3 MIDI')
+                    if nm: inp = mido.open_input(nm, callback=on_msg); state['inp_err'] = None; LOG.write(time.ctime() + ' launchpad input back\n')
+            except Exception as e:
+                if state.get('inp_err') != str(e): state['inp_err'] = str(e); LOG.write(time.ctime() + f' launchpad input reopen failed: {e}\n')
+            try:                                                    # faders, Rack itself) light up or go dark on both pages too
+                n0 = state['acts']; paths = [{} for _ in sections.PAGES]
+                fresh = [sections.now(p['rows'], RP(k), paths[k]) if p['rows'] else {} for k, p in enumerate(sections.PAGES)]
+                if not state['busy'] and state['acts'] == n0: state['on'], state['path'] = fresh, paths   # a press / row flip during the read wins: that snapshot is stale
+                state['machine'] = next(x['value'] for x in sections.json.loads(sections.call('vcvrack_get_params', {'moduleId': sections.DRUMS})) if x['id'] == 5) > 0.001
+                cur = fx.strips()                                    # in/out moves lit by what the strips really are
+                for name, (k, _) in list(fx.STRIP_TOGGLE.items()) + ([('drums in/out', (4, 0))] if not state['fading'] else []):
+                    if name in state['edir']: continue               # an entry still ramping: its press set the light (an out keeps the strip up)
+                    state['fx'] = (state['fx'] | {name}) if cur[k] > 0.001 else (state['fx'] - {name})
+                if SYN(): state['slit'] = synths.lit(state)              # Synths page: lit by what the arp + acid really are (MiniLab, Rack)
+            except Exception: LOG.write(traceback.format_exc())
+            try: paint()
+            except Exception: LOG.write(traceback.format_exc())
+            t = time.time()
+    park_or_close(inp); inp = None
+    try:
+        with HOLDL: fx.vox_clean(state)                              # stopping: no vox stutter left held in Rack
+    except Exception: LOG.write(traceback.format_exc())
+    for n in range(11, 90): led(n, 0)
+    with lock: o, out = out, None
+    park_or_close(o)
+finally: LOG.flush(); os._exit(0)                               # no interpreter teardown: it would run __del__ (a second closePort) on parked ports

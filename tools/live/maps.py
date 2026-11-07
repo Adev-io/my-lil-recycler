@@ -53,10 +53,11 @@ def to_cc(f, value):                                                    # Rack v
     return min(range(128), key=lambda v: abs(f(v) - value))
 
 def pad_labels(samples):                                                # Launchpad pad text from the row's sample files
-    parts = [re.match(r'\d-([a-z]+)-(\d\d)(?:_([a-z]+))?', os.path.basename(p)).groups() + ('chop' in os.path.basename(p),) for p in samples]
-    mixed_stem, mixed_chop = len({s for s, *_ in parts}) > 1, len({c for *_, c in parts}) > 1
+    half = lambda f: (re.search(r'-chop4([ab])\.wav$', f) or [None, None])[1]                  # chop4a / chop4b = 4-bar half A / B -> 'a' / 'b'
+    parts = [re.match(r'\d-([a-z]+)-(\d\d)(?:_([a-z]+))?', f).groups() + ('chop' in f and not half(f), half(f)) for f in map(os.path.basename, samples)]
+    mixed_stem, mixed_chop = len({s for s, *_ in parts}) > 1, len({c for *_, c, _ in parts}) > 1
     return [(({'other': 'strings', 'mix': 'full'}.get(s, s) + ' ') if mixed_stem else '') + n + (f' {w}' if w else '')
-            + (' chop' if c and mixed_chop else '') for s, n, w, c in parts]   # w = section word in the file name (toom: 05_verse)
+            + (' chop' if c and mixed_chop else '') + (f' {h}' if h else '') for s, n, w, c, h in parts]   # w = section word in the file name (toom: 05_verse)
 
 LEVELF = os.path.join(S.here, 'drums_level.json')                       # the drum machine's level from before a pad turned it off
 def drum_pad(i):   # drums + mix pad i: pick beat i + 1; the playing beat again = drum beat off; any pad while off = on, that beat

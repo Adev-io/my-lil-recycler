@@ -250,7 +250,7 @@ for pg in S.PAGES:
         l2 = maps.pad_labels(r['samples2']); assert 0 < len(l2) <= 8 and all(l2) and len(set(l2)) == len(l2), (r['name'], l2)
         assert all(os.path.exists(p) for p in r['samples2']), (r['name'], 'a page 2 pad points at a missing file')
         assert not set(r['samples2']) & set(r['samples']), (r['name'], 'a sample on both row pages')
-        assert b not in (11, 21), (r['name'], 'row-end CC 19 / 29 = moves bank / drum machine')
+        assert b != 11, (r['name'], 'row-end CC 19 = moves bank')
 src_p = open(os.path.join(S.here, 'pads.py'), encoding='utf-8').read()
 keep = [n for n in ast.parse(src_p).body if (isinstance(n, ast.FunctionDef) and n.name in ('rowflip', 'pad', 'act'))
         or (isinstance(n, ast.Assign) and any(getattr(t, 'id', None) in ('ROW_CC', 'L', 'RP') for t in n.targets))]
@@ -261,11 +261,12 @@ Q2 = dict(state=st2, sections=S, fx=fx, os=os, time=__import__('time'), tracebac
           MOVES=lambda: {}, SYN=lambda: bool(S.PAGES[st2['page']].get('synth')), R=lambda: S.PAGES[st2['page']]['rows'], ON=lambda: st2['on'][st2['page']],
           paint=lambda: None, LOG=types.SimpleNamespace(write=logs.append))
 exec(compile(ast.Module(body=keep, type_ignores=[]), 'pads.py', 'exec'), Q2)
+real_chops = S.CHOPS; S.CHOPS = os.path.join(S.here, 'no-such-chops.json')   # main + samples2 only here; the chop pages are checked below on a fake chops.json
 try:
     S.play = lambda slot, path, level, deck=None: played.append((slot, path, level, deck))
     rf, pad, act, on = Q2['rowflip'], Q2['pad'], Q2['act'], st2['on'][0]
     s1, s2 = R81['samples'], R81['samples2']
-    assert Q2['ROW_CC'] == {39: 31, 49: 41, 59: 51, 69: 61, 79: 71, 89: 81}, Q2['ROW_CC']               # 19 / 29 (bank, machine) left alone
+    assert Q2['ROW_CC'] == {29: 21, 39: 31, 49: 41, 59: 51, 69: 61, 79: 71, 89: 81}, Q2['ROW_CC']       # 19 (moves bank) left alone; 29 = drums row pages
     assert pad(88) == (81, 7) and rf(81) and st2['rowpage'] == {(0, 81): 1} and pad(88) is None and pad(87) == (81, 6)   # page 2: 7 pads
     act(85); assert played[-1] == (3, s2[4], R81['level'], None) and on[81] == 4 and st2['path'][0][81] == s2[4], (played, on)   # page 2 pad 5 plays samples2[4]
     rf(81); assert on[81] is None and st2['path'][0][81] == s2[4]          # page 1 on show: the playing page-2 sample lights nothing
@@ -284,11 +285,74 @@ try:
     vst['params'][3]['value'] = 0.0; assert S.now({81: R81}, {81: 1}, ps) == {81: None} and ps == {81: None}
     import board; board.ST = dict(st2, bank=0, machine=True, fx=set(), vox={}, hw=False)   # the console: labels of the row page on show
     rows = {r['base']: r for r in board.launchpad()['rows']}
-    assert rows[81]['labels'] == maps.pad_labels(s1) and rows[81]['page2'] == 0 and rows[71]['page2'] is None, rows[81]
+    assert rows[81]['labels'] == maps.pad_labels(s1) and (rows[81]['rpage'], rows[81]['rpages']) == (0, 2) and rows[71]['rpages'] == 1, rows[81]
     rf(81); board.ST['rowpage'] = st2['rowpage']; rows = {r['base']: r for r in board.launchpad()['rows']}
-    assert rows[81]['labels'][:7] == maps.pad_labels(s2) and rows[81]['page2'] == 1 and rows[81]['on'] is None, rows[81]
+    assert rows[81]['labels'][:7] == maps.pad_labels(s2) and (rows[81]['rpage'], rows[81]['rkind']) == (1, 'extra') and rows[81]['on'] is None, rows[81]
 finally: S.play, S.call = real_play, real_vox['call']
-print('Row page 2 offline: Lowdown vocals page 2 =', maps.pad_labels(R81['samples2']), '| CC 89 flips (39..89, not 19 / 29), page 2 pad plays samples2[i], lit follows the sample'
+# ---- chop pages (every row's end button: main -> samples2 -> chop halves -> main) on a fake chops.json
+import tempfile, shutil
+assert maps.pad_labels(['x/4-piano-14-115bpm-chop4a.wav', 'x/4-piano-14-115bpm-chop4b.wav']) == ['14 a', '14 b']
+assert maps.pad_labels(['x/6-vocals-05_verse-124bpm-chop4b.wav', 'x/6-vocals-04_choir-115bpm-chop4a.wav', 'x/6-vocals-14-115bpm-chop4a.wav']) == ['05 verse b', '04 choir a', '14 a']
+assert maps.pad_labels(['x/5-other-15-115bpm-chop4a.wav', 'x/7-mix-08-115bpm-chop4b.wav']) == ['strings 15 a', 'full 08 b']   # stem prefix kept
+half = lambda p, h: p[:-4] + f'-chop4{h}.wav'
+K, V2, DR = S.ROWS[71]['samples'], R81['samples2'], S.ROWS[21]['samples']
+fake = {p: [half(p, 'a'), half(p, 'b')] for p in K + V2[:3] + DR[:3]}
+fake[K[2]] = [half(K[2], 'a'), None]                                             # a null half is skipped
+tmpd = tempfile.mkdtemp(); S.CHOPS = os.path.join(tmpd, 'chops.json'); json.dump(fake, open(S.CHOPS, 'w'))
+try:
+    S.play = lambda slot, path, level, deck=None: played.append((slot, path, level, deck))
+    st2.update(page=0, busy=False, rowpage={}, on=[{} for _ in S.PAGES], path=[{} for _ in S.PAGES]); on = st2['on'][0]
+    kh = [h for p in K for h in fake[p] if h]                                     # keys: 15 halves -> chop pages of 8 + 7
+    PK = S.pages(S.ROWS[71]); assert PK == [K, kh[:8], kh[8:]] and [S.kind(S.ROWS[71], k) for k in range(3)] == ['main', 'chop', 'chop'], PK
+    assert maps.pad_labels(PK[1]) == ['14 a', '14 b', '15 a', '15 b', '16 a', '13 a', '13 b', '03 a'], maps.pad_labels(PK[1])
+    PV = S.pages(R81); assert PV == [s1, V2, [h for p in V2[:3] for h in fake[p]]] and S.kind(R81, 1) == 'extra' and S.kind(R81, 2) == 'chop', PV
+    assert maps.pad_labels(PV[2]) == ['15 a', '15 b', '16 a', '16 b', '12 a', '12 b'], maps.pad_labels(PV[2])
+    order = []
+    for _ in range(4): rf(81); order.append(st2['rowpage'][(0, 81)])
+    assert order == [1, 2, 0, 1], order                                            # main -> samples2 -> chops -> main -> samples2
+    rf(81); rf(81); assert st2['rowpage'][(0, 81)] == 0
+    rf(71); assert pad(71) == (71, 0) and pad(78) == (71, 7)                      # keys chop page 1: 8 pads
+    on[61] = 2; act(71); R71 = S.ROWS[71]                                         # 'a' plays its half; bridge keys (same slot) cleared
+    assert played[-1] == (R71['slot'], kh[0], R71['level'], None) and kh[0].endswith('-chop4a.wav') and on[71] == 0 and on[61] is None, (played[-1], on)
+    act(72); assert played[-1][1] == kh[1] and kh[1].endswith('-chop4b.wav') and on[71] == 1 and st2['path'][0][71] == kh[1]
+    rf(71); assert on[71] is None and pad(78) is None and pad(77) == (71, 6)       # chop page 2: 7 pads, the playing half lit nowhere
+    rf(71); assert on[71] is None and st2['rowpage'][(0, 71)] == 0                 # wraps to main: the half is not on main
+    rf(71); assert on[71] == 1; act(72); assert played[-1][1] is None and on[71] is None   # back on its page: lit; again = muted
+    rf(71); rf(71)
+    assert rf(21) and S.kind(S.ROWS[21], st2['rowpage'][(0, 21)]) == 'chop' and rf(21) and st2['rowpage'][(0, 21)] == 0   # CC 29: drums row cycles too
+    assert not rf(61)                                                            # bridge keys: sources already 4-bar chops, one page
+    vst = {'params': [{'id': 14 + k, 'value': 1.0 if k == 1 else 0.0} for k in range(4)], 'data': {'slots': [{'path': ''}, {'path': kh[9]}, {'path': ''}, {'path': ''}]}}
+    S.call = lambda name, args=None: json.dumps(vst); ps = {}                    # sections.now on a chop page: index there, path on any page
+    assert S.now({71: R71}, {71: 2}, ps) == {71: 1} and ps == {71: kh[9]} and S.now({71: R71}, {71: 1}, ps) == {71: None} and ps == {71: kh[9]}
+    board.ST = dict(st2, bank=0, machine=True, fx=set(), vox={}, hw=False); st2['rowpage'][(0, 71)] = 1
+    rows = {r['base']: r for r in board.launchpad()['rows']}
+    assert (rows[71]['rpage'], rows[71]['rpages'], rows[71]['rkind']) == (1, 3, 'chop') and rows[71]['labels'][0] == '14 a' and rows[21]['rpages'] == 2, rows[71]
+    st2['rowpage'][(0, 71)] = 7; assert board.launchpad()['rows'][1]['rpage'] == 0 and Q2['L'](0, 71) == K   # stale index (fewer pages now) = page 1
+    rf(71); assert st2['rowpage'][(0, 71)] == 0
+    os.remove(S.CHOPS); assert S.pages(R71) == [K] and not rf(71)               # chops.json gone: no chop pages
+    open(S.CHOPS, 'w').write('{"half written'); assert S.pages(R71) == [K]      # half-written: none either, no error
+    assert not [l for l in logs if 'Traceback' in l], logs
+finally: S.play, S.call, S.CHOPS = real_play, real_vox['call'], real_chops; shutil.rmtree(tmpd, ignore_errors=True)
+PM = {'state': {'machine': True}, 'ARROWS': {93: -1, 94: 1}, 'MODE_CC': {96: 'mix', 97: 'acid', 98: 'env'}, 'fx': fx, 'SYN': lambda: False, 'MOVES': lambda: {}}
+hits = []; PM.update(threading=types.SimpleNamespace(Thread=SyncThread), machine=lambda: hits.append('machine'), rowflip=lambda b: hits.append(('row', b)),
+                     turn=lambda d: hits.append(('turn', d)), minilab=lambda m: hits.append(('mode', m)), flip=lambda: hits.append('bank'), press=lambda *a: None)
+exec(compile(ast.Module(body=[n for n in ast.parse(src_p).body if (isinstance(n, ast.FunctionDef) and n.name == 'on_msg')
+                              or (isinstance(n, ast.Assign) and any(getattr(t, 'id', None) in ('MACHINE_CC', 'ROW_CC') for t in n.targets))], type_ignores=[]), 'pads.py', 'exec'), PM)
+for c in (95, 29, fx.BANK_CC, 89, 96): PM['on_msg'](types.SimpleNamespace(type='control_change', control=c, value=127))
+assert PM['MACHINE_CC'] == 95 and hits == ['machine', ('row', 21), 'bank', ('row', 81), ('mode', 'mix')], hits   # Session = drum machine, CC 29 = drums row pages
+html = open(os.path.join(S.here, 'board.html'), encoding='utf-8').read()
+assert 'c === 4' in html and 'round machine' in html and 'r.base === 21' not in html, 'console: the drum machine button sits on the top row (Session)'
+if os.path.exists(real_chops):                                                   # the real chops.json (once cut): every page labelled, chop files there
+    for pg in S.PAGES:
+        for b, r in pg['rows'].items():
+            for k, Lk in enumerate(S.pages(r)):
+                lk = maps.pad_labels(Lk); assert 0 < len(lk) <= 8 and all(lk) and len(set(lk)) == len(lk), (pg['name'], r['name'], k, lk)
+                if S.kind(r, k) == 'chop': assert all(os.path.exists(p) and p.endswith(('-chop4a.wav', '-chop4b.wav')) for p in Lk), (r['name'], k, 'a chop pad points at a missing file')
+    print('Real chops.json: row pages', {f"{pg['name'][:7]} {r['name']}": len(S.pages(r)) for pg in S.PAGES for r in pg['rows'].values()})
+else: print('Real chops.json absent: no chop pages yet (rows show main / samples2 only)')
+print('Chop pages offline: pages = main, samples2, chop halves (nulls skipped, 8 a page); end button cycles main -> samples2 -> chops -> main, a/b labels,'
+      ' chop pad plays its -chop4a/b file, lit follows across pages, bridge keys cleared, CC 29 cycles drums, Session CC 95 = drum machine, chops.json missing / half-written = none')
+print('Row page 2 offline: Lowdown vocals page 2 =', maps.pad_labels(R81['samples2']), '| CC 89 flips (29..89, not 19), page 2 pad plays samples2[i], lit follows the sample'
       ' playing across flips, mute, busy / no page 2 / TOOM / Synths refused, sections.now by row page, console labels + page2')
 print('Vox fixes offline: record before write (failed hold stays held + lit, its note off lets go), quick-stab let go retried once, clean per deck + first error raised,'
       ' no_stut drops 40-44, sections.play state has no params, pads.press/on_msg: second vox press while busy not dropped, clean past busy, other moves still wait')
@@ -310,5 +374,7 @@ assert bad.closes == 1 and PD['_dead'] == [bad, vanished], PD['_dead']          
 assert vanished.closes == 0 and fine.closes == 1 and fine not in PD['_dead'] and bad.callback is None and vanished.callback is None
 lookup = FakePort('Launchpad lookup', boom=True); PD['park_or_close'](lookup); assert lookup.closes == 0 and lookup in PD['_dead']   # gone=None: looked up, name not listed -> parked untried
 PD['mido'].get_input_names = lambda: ['listed']; listed = FakePort('listed', boom=True); PD['park_or_close'](listed); assert listed.closes == 1 and listed in PD['_dead']
+PD['mido'].get_input_names = lambda: 1 / 0; blind = FakePort('listed'); PD['park_or_close'](blind)   # the lookup itself fails: parked, never closed on a guess
+assert blind.closes == 0 and blind in PD['_dead'] and blind.callback is None
 print('Dead port offline: a vanished port or a close that raises is parked in _dead, never closed again; a healthy port closes once')
 print('ok')

@@ -34,7 +34,8 @@ def set_deck_filters(d, v): S.call('vcvrack_set_params', {'moduleId': d, 'params
 def transition(page, on, alive):   # the song not on show sweeps up + fades out; the song on show fades in. Returns False if cut off.
     rows, other = S.PAGES[page]['rows'], 1 - page
     own = S.A if page == 0 else S.B; mix = strips()
-    if not any(v is not None for v in S.now(rows).values()):       # nothing of it playing (asked of the rig): bring in its verse pads
+    ps = {}; S.now(rows, None, ps)
+    if not any(ps.values()):                                       # nothing of it playing on any row page (asked of the rig): bring in its verse pads
         for b in FIRST:
             r = rows[b]; S.play(r['slot'], r['samples'][0], r['level'], r.get('deck')); on[page][b] = 0
         S.call('vcvrack_set_params', {'moduleId': S.MIX, 'params': [{'id': STRIP[own], 'value': 0.0}]}); mix[STRIP[own]] = 0.0

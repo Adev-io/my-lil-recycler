@@ -131,14 +131,28 @@ def play(slot, path, level, deck=None):                        # path None = mut
             st['data']['slots'][slot]['path'] = path; st.pop('params', None)   # data only: a STUT press between the get and the set stays
             call('vcvrack_set_module_state', {'id': deck, 'state': st})
     call('vcvrack_set_params', {'moduleId': deck, 'params': [{'id': 14 + slot, 'value': level if path else 0.0}]})
-def cur(r, p2=0):                                              # a row's sample list on show: page 2 (samples2) or page 1
-    return r['samples2'] if p2 and r.get('samples2') else r['samples']
-def now(rows=None, pages=None, paths=None):                    # row -> index of the sample playing (None = muted), read from the rig.
-    out = {}                                                   # pages: row -> 0/1 (row page on show, default 1); the index is in that
-    for b, r in (rows or ROWS).items():                        # list, None when the sample playing sits on the other row page.
+CHOPS = os.path.join(here, 'chops.json')                       # source path -> [4-bar half A, half B] (null = none); written by the chop cutter
+_chops = {'m': None, 'd': {}}
+def chops():                                                   # read when it changes; missing or half-written = no chop pages
+    try:
+        m = (CHOPS, os.path.getmtime(CHOPS))
+        if _chops['m'] != m: _chops.update(d=json.load(open(CHOPS)), m=m)
+        return _chops['d']
+    except (OSError, ValueError): return {}
+def pages(r):                                                  # a row's pad pages (row-end round button cycles them): samples, samples2,
+    ch = chops(); src = r['samples'] + r.get('samples2', [])   # then the 4-bar A/B halves of those samples, 8 pads (4 samples) a page
+    halves = list(dict.fromkeys(h for s in src for h in (ch.get(s) or []) if h))
+    return [r['samples']] + ([r['samples2']] if r.get('samples2') else []) + [halves[k:k + 8] for k in range(0, len(halves), 8)]
+def kind(r, k):                                                # 'main' / 'extra' (samples2) / 'chop'
+    return 'main' if not k else 'extra' if k == 1 and r.get('samples2') else 'chop'
+def cur(r, k=0):                                               # a row's sample list on show: its row page k (gone = page 1)
+    P = pages(r); return P[k] if 0 <= k < len(P) else P[0]
+def now(rows=None, pages_=None, paths=None):                   # row -> index of the sample playing (None = muted), read from the rig.
+    out = {}                                                   # pages_: row -> row page on show (default 0); the index is in that
+    for b, r in (rows or ROWS).items():                        # list, None when the sample playing sits on another row page.
         st = json.loads(call('vcvrack_get_module_state', {'id': r.get('deck', A)})); lv = {p['id']: p['value'] for p in st['params']}
-        path = st['data']['slots'][r['slot']]['path']; L = cur(r, (pages or {}).get(b, 0))
-        on = lv[14 + r['slot']] > 0.01 and path in r['samples'] + r.get('samples2', [])
+        path = st['data']['slots'][r['slot']]['path']; L = cur(r, (pages_ or {}).get(b, 0))
+        on = lv[14 + r['slot']] > 0.01 and any(path in P for P in pages(r))
         out[b] = L.index(path) if on and path in L else None
         if paths is not None: paths[b] = path if on else None  # paths: filled with row -> the row's sample playing (None = muted)
     return out

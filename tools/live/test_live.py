@@ -30,6 +30,10 @@ def loud(d): return json.loads(S.call('vcvrack_measure', {'moduleId': d, 'output
 def lit(name): return next(r['on'] for r in get()['launchpad']['rows'] if r['name'] == name)
 def fxon(name): return next(f['on'] for f in get()['launchpad']['fx'] if f['name'] == name)
 def row(name): return next(r for r in get()['launchpad']['rows'] if r['name'] == name)   # Synths page rows: 'lit' = pad indexes lit
+def rp_to(name, k):                                               # press a row's end button until its row page k is on show
+    for _ in range(row(name)['rpages'] + 1):
+        if row(name)['rpage'] == k: return
+        idle(); post('/rowpage', {'base': row(name)['base']})
 near = lambda a, b, tol=0.002: abs(a - b) <= tol
 ENTRY_KNOB = {'acid in/out': fx.acid_cutoff, 'arp in/out': synths.arp_gate}               # what each 2-bar entry ramps, then puts back
 
@@ -38,7 +42,7 @@ saved = {d: json.loads(S.call('vcvrack_get_module_state', {'id': d})) for d in (
 saved_vs = {m: json.loads(S.call('vcvrack_get_module_state', {'id': m})) for m in (synths.ARP, S.ACID)}   # arp dir + Acid patterns (keep writes one)
 saved_p = {m: {x['id']: x['value'] for x in json.loads(S.call('vcvrack_get_params', {'moduleId': m}))} for m in (S.MIX, S.DRUMS, S.ACID, synths.TRI)}
 g0 = get(); saved_page, saved_bank, saved_mode, saved_bpm = g0['launchpad']['page'], g0['launchpad']['bank'], g0['minilab']['mode'], fx.bpm()
-saved_rp = None                                                  # Lowdown vocals row page (1 = page 2) as found, put back at the end
+saved_rp = None                                                  # Lowdown vocals / keys row pages as found, put back at the end
 print('saved rig: page', saved_page + 1, 'bank', saved_bank + 1, 'mode', saved_mode, 'bpm', saved_bpm, 'strips', st())
 try:
     # ---- baseline: every sample part muted, strips open, drum machine on, bank 1
@@ -70,22 +74,33 @@ try:
     press(41); S.call('vcvrack_set_params', {'moduleId': S.A, 'params': [{'id': 14, 'value': 0.0}]}); time.sleep(6.5)
     check('page follows a change made in Rack', lit('bass') is None)
 
-    # ---- row page 2: the round button at the end of the Lowdown vocals row (CC 89) flips its pads to samples2
+    # ---- row pages: the round button at a row's end (CC base + 8) cycles main -> samples2 -> chop halves -> main
     v = row('vocals')
-    if 'page2' not in v: print('SKIP  vocals row page 2  pads.py from before the row page button: restart it', flush=True)
+    if 'rpages' not in v: print('SKIP  row pages  pads.py from before the row page cycle: restart it', flush=True)
     else:
-        saved_rp = v['page2']; s2 = S.ROWS[81]['samples2']
-        if v['page2']: idle(); post('/rowpage', {'base': 81})
+        saved_rp = {nm: row(nm)['rpage'] for nm in ('vocals', 'keys')}; s2 = S.ROWS[81]['samples2']
+        rp_to('vocals', 0)
         a0 = (path(S.A, 3), lv(S.A)[3]); idle(); r = post('/rowpage', {'base': 81}); g = row('vocals')
-        check('vocals round button -> page 2, sound untouched', r['ok'] and g['page2'] == 1 and g['labels'] == maps.pad_labels(s2) and (path(S.A, 3), lv(S.A)[3]) == a0, f"{g['labels']}")
+        check('vocals round button -> page 2, sound untouched', r['ok'] and g['rpage'] == 1 and g['rkind'] == 'extra' and g['labels'] == maps.pad_labels(s2) and (path(S.A, 3), lv(S.A)[3]) == a0, f"{g['labels']}")
         press(85); time.sleep(6)                                      # the 5 s refresh reads the rig by row page: still lit
         check('vocals page 2 pad 5 plays 04 choir, lit after the refresh', path(S.A, 3) == os.path.basename(s2[4]) and lv(S.A)[3] == 1.0 and lit('vocals') == 4, f'{path(S.A, 3)} lit {lit("vocals")}')
-        idle(); post('/rowpage', {'base': 81}); a = (row('vocals')['page2'], lit('vocals')); idle(); post('/rowpage', {'base': 81}); b = lit('vocals')
-        check('page 1 shown: no pad lit; page 2 again: pad 5 lit', a == (0, None) and b == 4 and path(S.A, 3) == os.path.basename(s2[4]), f'{a} {b}')
+        rp_to('vocals', 0); a = lit('vocals'); rp_to('vocals', 1); b = lit('vocals')
+        check('page 1 shown: no pad lit; page 2 again: pad 5 lit', a is None and b == 4 and path(S.A, 3) == os.path.basename(s2[4]), f'{a} {b}')
         press(85); check('page 2 lit pad again mutes', lv(S.A)[3] == 0.0 and lit('vocals') is None)
-        idle(); post('/rowpage', {'base': 81})
+        rp_to('vocals', 0)
         try: post('/rowpage', {'base': 81}, origin='http://evil.example'); check('foreign site refused (row page)', False)
-        except urllib.error.HTTPError as e: check('foreign site refused (row page)', e.code == 403 and row('vocals')['page2'] == 0, f'HTTP {e.code}')
+        except urllib.error.HTTPError as e: check('foreign site refused (row page)', e.code == 403 and row('vocals')['rpage'] == 0, f'HTTP {e.code}')
+        k = row('keys')                                               # keys row: once round to its first chop page, the 'a' pad plays the 4-bar half A
+        if not os.path.exists(S.CHOPS) or k['rpages'] < 2: print('SKIP  keys chop page  no chops.json (or no keys halves in it)', flush=True)
+        else:
+            idle(); r = post('/rowpage', {'base': 71}); g = row('keys')
+            check('keys round button -> chop page', r['ok'] and g['rpage'] == 1 and g['rkind'] == 'chop' and g['labels'][0].endswith(' a'), f"{g['labels']}")
+            press(71); p1 = path(S.A, 1)
+            check("keys chop page 'a' pad plays its -chop4a half", p1.endswith('-chop4a.wav') and p1 == os.path.basename(S.cur(S.ROWS[71], 1)[0]) and lv(S.A)[1] == 1.2 and lit('keys') == 0, f'{p1} lit {lit("keys")}')
+            press(71); check('keys chop pad again mutes', lv(S.A)[1] == 0.0 and lit('keys') is None)
+            n = row('keys')['rpages']
+            for _ in range(n - 1): idle(); post('/rowpage', {'base': 71})
+            check('keys round button cycles back to page 1', row('keys')['rpage'] == 0 and row('keys')['labels'] == maps.pad_labels(S.ROWS[71]['samples']), f"{n} pages")
 
     # ---- bank 1
     press(11); time.sleep(4); fa, fb = fx.deck_filters(S.A), fx.deck_filters(S.B)
@@ -180,7 +195,7 @@ try:
 
     # ---- drums
     l0 = prm(S.DRUMS, 5); r1 = post('/machine'); r2 = post('/machine')
-    check('drum machine button off / on', r1['on'] is False and r2['on'] is True and abs(prm(S.DRUMS, 5) - l0) < 0.002)
+    check('drum machine button (top-row Session) off / on', r1['on'] is False and r2['on'] is True and abs(prm(S.DRUMS, 5) - l0) < 0.002)
     post('/mode', {'mode': 'mix'}); time.sleep(3); p0 = S.current_drum_pattern() - 1
     tp = 1 if p0 != 1 else 2                                   # a beat that is not the one playing
     post('/set', {'pad': tp}); a = (S.current_drum_pattern(), prm(S.DRUMS, 5) > 0)
@@ -215,9 +230,9 @@ finally:
         S.call('vcvrack_set_module_state', {'id': d, 'state': s})
     for m, p in saved_p.items(): S.call('vcvrack_set_params', {'moduleId': m, 'params': [{'id': k, 'value': v} for k, v in p.items()]})
     fx.bpm(saved_bpm); time.sleep(1)
-    try:                                                       # vocals row page as found
+    try:                                                       # vocals / keys row pages as found
         page(0)
-        if saved_rp is not None and row('vocals').get('page2') != saved_rp: idle(); post('/rowpage', {'base': 81})
+        for nm, k in (saved_rp or {}).items(): rp_to(nm, k)
     except Exception as e: print('row page put back failed', e)
     post('/mode', {'mode': saved_mode}); bank(saved_bank); page(saved_page); time.sleep(6)
     print('restored: page', get()['launchpad']['page'] + 1, 'bank', get()['launchpad']['bank'] + 1, 'mode', get()['minilab']['mode'], 'bpm', fx.bpm(), 'strips', st())
