@@ -14,20 +14,24 @@ state = {'on': [{} for _ in sections.PAGES], 'page': 0, 'busy': False, 'fx': set
 HUSH = {'drums only': (1, 2, 3, 5, 6), 'no drums': (0, 4)}       # Mixer strips each move silences: drums only = Acid, decks A/B,
                                                                  # Acid Voice, Triple; no drums = My lil Drums + the drum stem
 lp = lambda names, pre: next((x for x in names if x.startswith(pre)), None)        # Launchpad unplugged -> page only
-out = lp(mido.get_output_names(), 'MIDIOUT2 (LPMiniMK3'); out = out and mido.open_output(out); state['hw'] = bool(out)
-lock = threading.Lock()
+lock = threading.Lock()                                          # Launchpad sends AND closes happen under it: send on a closed rtmidi port = segfault
+PROG = mido.Message('sysex', data=[0x00, 0x20, 0x29, 0x02, 0x0D, 0x0E, 0x01])   # Launchpad Mini MK3 -> Programmer mode (a power-cycled one boots in Live mode)
+try: out = lp(mido.get_output_names(), 'MIDIOUT2 (LPMiniMK3'); out = out and mido.open_output(out)
+except Exception as e: out = None; LOG.write(time.ctime() + f' launchpad output open failed: {e}; the 5 s refresh retries\n')
+state['hw'] = bool(out)
 def lp_send(msg):                                               # every Launchpad send goes through here: a lost port (Windows re-enumerates
     global out                                                  # MIDI when another device is replugged) must not kill pads.py; the 5 s refresh reopens it
-    o = out
-    if not o: return
-    try:
-        with lock: o.send(msg)
-    except Exception as e:
-        try: o.close()
-        except Exception: pass
-        if out is o:                                            # several threads can fail on the same port: log once
-            out = None; state['hw'] = False; LOG.write(time.ctime() + f' launchpad output lost: {e}; retrying\n')
+    with lock:
+        o = out
+        if not o: return
+        try: o.send(msg); return
+        except Exception as e:
+            out = None; state['hw'] = False                     # out goes None BEFORE the close, inside the lock: nobody can send on a closed port
+            LOG.write(time.ctime() + f' launchpad output lost: {e}; retrying\n')
+            try: o.close()
+            except Exception: pass
 def led(note, vel, ch=0): lp_send(mido.Message('note_on', channel=ch, note=note, velocity=vel))
+lp_send(PROG)
 R = lambda: sections.PAGES[state['page']]['rows']                # rows of the page on show
 ON = lambda: state['on'][state['page']]                          # row -> playing index, for that page
 ARROWS = {93: -1, 94: 1}                                         # top row: left / right arrow (programmer mode CC)
@@ -211,27 +215,39 @@ def _scale():
     try: synths.follow(lambda: state['page'])
     except Exception: LOG.write(traceback.format_exc())
 threading.Thread(target=_scale, daemon=True).start()           # the arp's keys follow the page on show (own thread: a slow arp must not hold startup)
-inp = lp(mido.get_input_names(), 'LPMiniMK3 MIDI'); inp = inp and mido.open_input(inp, callback=on_msg)
+try: inp = lp(mido.get_input_names(), 'LPMiniMK3 MIDI'); inp = inp and mido.open_input(inp, callback=on_msg)
+except Exception as e: inp = None; LOG.write(time.ctime() + f' launchpad input open failed: {e}; the 5 s refresh retries\n')
 import board; board.start(press, state, turn, minilab, flip, machine)
 LOG.write(time.ctime() + f" start rows {state['on']} fx row {list(fx.FX.values())} launchpad {'on' if out else 'missing: page only'}"
-          f" page http://127.0.0.1:{board.PORT}\n"); paint(); t = time.time()
+          f" page http://127.0.0.1:{board.PORT}\n")
+try: paint()
+except Exception: LOG.write(traceback.format_exc())
+t = time.time()
 while not os.path.exists(STOP):
     time.sleep(0.25)
     if time.time() - t > 5:                                      # re-read the rig: rows brought in or out elsewhere (MiniLab, page
-        if not out:                                              # Launchpad output lost: reopen when it is back (failure = wait for the next refresh)
+        stale = not out                                          # output lost = the USB / MIDI stack changed: the input is suspect too
+        if stale:                                                # reopen the output when it is back (failure = wait for the next refresh)
             try:
                 nm = lp(mido.get_output_names(), 'MIDIOUT2 (LPMiniMK3')
-                if nm: out = mido.open_output(nm); state['hw'] = True; LOG.write(time.ctime() + ' launchpad output back\n'); paint()
+                if nm:
+                    new = mido.open_output(nm)                   # outside the lock; only the swap is inside
+                    with lock: out = new; state['hw'] = True
+                    LOG.write(time.ctime() + ' launchpad output back\n'); lp_send(PROG)
+                    try: paint()
+                    except Exception: LOG.write(traceback.format_exc())
             except Exception: pass
-        try:                                                     # same for the input: gone from the port list = close, reopen when listed
-            if inp is None or getattr(inp, 'name', None) not in mido.get_input_names():
+        try:                                                     # input: reopen when missing, when the output was lost, or when its name left the port list
+            names = mido.get_input_names()
+            if inp is None or stale or getattr(inp, 'name', None) not in names:
                 if inp is not None:
                     try: inp.close()
                     except Exception: pass
                     inp = None; LOG.write(time.ctime() + ' launchpad input lost; retrying\n')
-                nm = lp(mido.get_input_names(), 'LPMiniMK3 MIDI')
-                if nm: inp = mido.open_input(nm, callback=on_msg); LOG.write(time.ctime() + ' launchpad input back\n')
-        except Exception: pass
+                nm = lp(names, 'LPMiniMK3 MIDI')
+                if nm: inp = mido.open_input(nm, callback=on_msg); state['inp_err'] = None; LOG.write(time.ctime() + ' launchpad input back\n')
+        except Exception as e:
+            if state.get('inp_err') != str(e): state['inp_err'] = str(e); LOG.write(time.ctime() + f' launchpad input reopen failed: {e}\n')
         try:                                                    # faders, Rack itself) light up or go dark on both pages too
             n0 = state['acts']; fresh = [sections.now(p['rows']) for p in sections.PAGES]
             if not state['busy'] and state['acts'] == n0: state['on'] = fresh   # a press during the read wins: that snapshot is stale
@@ -240,9 +256,12 @@ while not os.path.exists(STOP):
             for name, (k, _) in list(fx.STRIP_TOGGLE.items()) + ([('drums in/out', (4, 0))] if not state['fading'] else []):
                 state['fx'] = (state['fx'] | {name}) if cur[k] > 0.001 else (state['fx'] - {name})
         except Exception: LOG.write(traceback.format_exc())
-        paint(); t = time.time()
+        try: paint()
+        except Exception: LOG.write(traceback.format_exc())
+        t = time.time()
 try: inp and inp.close()
 except Exception: pass
 for n in range(11, 90): led(n, 0)
-try: out and out.close()
+with lock: o, out = out, None
+try: o and o.close()
 except Exception: pass
