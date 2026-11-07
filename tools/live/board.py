@@ -10,7 +10,10 @@ PRESS, ST, TURN, MODE, FLIP, MACHINE = None, None, None, None, None, None
 def params(mods):                                       # Rack params per module, cached 0.5 s (the page polls every 0.5 s)
     with lock:
         if time.time() - cache['t'] > 0.5 or not mods <= set(cache['p']):
-            cache['p'] = {m: {x['id']: x['value'] for x in json.loads(S.call('vcvrack_get_params', {'moduleId': m}))} for m in mods}
+            cache['p'] = {}
+            for m in mods:                                  # a module that fails reads as {}: its controls show unavailable, the page stays up
+                try: cache['p'][m] = {x['id']: x['value'] for x in json.loads(S.call('vcvrack_get_params', {'moduleId': m}))}
+                except Exception: cache['p'][m] = {}
             cache['t'] = time.time()
         return cache['p']
 def mode():
@@ -30,9 +33,11 @@ def minilab():
     p = params({mod for mod, *_ in CC.values()} | {pm})
     def ctl(cc):
         if cc not in CC: return dict(cc=cc, label='', pos=None, value=None)
-        mod, pid, f, label = CC[cc]; v = p[mod][pid]
+        mod, pid, f, label = CC[cc]
+        if pid not in p[mod]: return dict(cc=cc, label=label, pos=None, value=None)
+        v = p[mod][pid]
         return dict(cc=cc, label=label, pos=maps.to_cc(f, v), value=round(v, 2))
-    cur = round(p[pm][pp]); live = m != 'mix' or p[pm][5] > 0.001          # mix: beat pads dark while the drum beat is off
+    cur = round(p[pm][pp]) if pp in p[pm] else None; live = m != 'mix' or p[pm].get(5, 0) > 0.001          # mix: beat pads dark while the drum beat is off
     return dict(mode=m, title=M['title'], knobs=[ctl(c) for c in maps.KNOBS], faders=[ctl(c) for c in maps.FADERS],
                 pads=[dict(i=i, label=M['pad_label'](off + i), on=live and cur == off + i) for i in range(n)], keys=M['keys'])
 ccmap = lambda m: maps.mix_map() if m == 'mix' else maps.MODES[m]['cc']   # mix follows the song on show

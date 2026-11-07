@@ -42,7 +42,7 @@ near = lambda a, b, tol=0.002: abs(a - b) <= tol
 
 # ---- save the rig
 saved = {d: json.loads(S.call('vcvrack_get_module_state', {'id': d})) for d in (S.A, S.B, C, synths.ARP, S.ACID)}
-saved_p = {m: prms(m) for m in (S.MIX, S.DRUMS, S.ACID)}
+saved_p = {m: prms(m) for m in (S.MIX, S.DRUMS, S.ACID, synths.TRI)}
 saved_strips, saved_bpm = fx.strips(), fx.bpm()
 saved_level = open(LEVELF).read() if os.path.exists(LEVELF) else None
 g0 = get(); L0 = g0['launchpad']; saved_page, saved_bank, saved_mode = L0['page'], L0['bank'], g0['minilab']['mode']

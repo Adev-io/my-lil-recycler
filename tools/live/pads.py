@@ -1,7 +1,7 @@
 # Launchpad Mini MK3 (Programmer mode) -> the set by rows. Each row in sections.ROWS = one slot (row 1 vocals, row 2 keys ...):
 # a pad picks that row's sample (blinking blue = playing), the lit pad again mutes the row. Pressed pad flashes white.
 # Row 8 (fx.FX) = transition moves; a toggled move blinks blue, pressing it again releases it. The moves row is on every page.
-# Top-row Drums / Keys buttons (CC 96/97) = MiniLab program: drums + mix map (minilab.py) / Acid Bass (acid.py).
+# Top-row Drums / Keys buttons (CC 96/97) = MiniLab program: drums + mix map (minilab.py) / Synths (acid.py).
 # Top-row arrows left/right (CC 93/94) = previous/next page (sections.PAGES: 1 Lowdown, 2 Time Out Of Mind). A page turn changes
 # only the pads, never the sound; each page remembers what its rows play. Lit arrow = there is a page that way.
 # MIDI only plus one MCP batch per press; sections.py and fx.py are reloaded per press. Stops when pads.stop exists. Log: pads.log.
@@ -37,7 +37,7 @@ def machine():                                                  # My lil Drums o
 MOVES = lambda: fx.BANKS[state['bank']]                           # moves row: bank 1 (fx.FX) or bank 2 (fx.FX2), flipped by fx.BANK_CC
 def flip():                                                     # the round button at the end of the moves row: next bank of moves
     state['bank'] = (state['bank'] + 1) % len(fx.BANKS); LOG.write(time.ctime() + f" moves bank {state['bank'] + 1}\n"); paint(); return True
-MODE_CC = {96: 'mix', 97: 'acid'}                                # top row Drums / Keys buttons: MiniLab = drums + mix map / Acid Bass
+MODE_CC = {96: 'mix', 97: 'acid'}                                # top row Drums / Keys buttons: MiniLab = drums + mix map / Synths
 MODEF = os.path.join(here, 'minilab.mode')
 def mode_now():
     try: return open(MODEF).read().strip()

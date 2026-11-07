@@ -1,4 +1,4 @@
-# MiniLab 3 -> My lil Acid Bass + the arp's gate + Triple's cutoff (Synths mode) (replaces minilab.py while it runs: Windows lets one program hold the MiniLab).
+# MiniLab 3 Synths mode: the Acid Bass plus the arp's gate and Triple's cutoff (replaces minilab.py while it runs: Windows lets one program hold the MiniLab).
 # Keys: play the bass live (forwarded to 'loopMIDI Port 1' -> Rack MIDI to CV -> Acid Bass Play ins; acid_add.py patched it).
 #   One octave down (middle C plays C2). Hold a key into the next = slide. Hit hard (velocity >= ACC_VEL) = accent.
 #   While a key is held the sequencer stops; it starts again RESUME s after the last key is let go (back in step with the clock).
@@ -48,16 +48,18 @@ def on_msg(m):
                 if not held: seq['release'] = time.time()
     elif m.type not in ('clock', 'active_sensing', 'polytouch', 'aftertouch'): log(f'unmapped {m}')
 def refresh():                                # Rack's values; a control whose value moved elsewhere must be picked up again
-    mods = {mod for mod, *_ in MAP.values()}
-    p = {mod: {x['id']: x['value'] for x in json.loads(S.call('vcvrack_get_params', {'moduleId': mod}))} for mod in mods}
+    p = {}
+    for mod in {mod for mod, *_ in MAP.values()}:   # one module missing or erroring must not stop the others
+        try: p[mod] = {x['id']: x['value'] for x in json.loads(S.call('vcvrack_get_params', {'moduleId': mod}))}
+        except Exception as e: log(f'refresh: module {mod} unavailable ({str(e)[:80]})')
     with lock:
         for cc, (mod, pid, _, label) in MAP.items():
             k = (mod, pid)
-            if k in pending: continue
-            if cc in eng and abs(p[mod][pid] - cur.get(k, p[mod][pid])) > TOLS.get(k, 0.04) / 2: eng.discard(cc); log(f'dropped {label}')
+            if k in pending or mod not in p or pid not in p[mod]: continue
+            if cc in eng and abs(p[mod][pid] - cur.get(k, p[mod][pid])) > TOLS.get(k, TOL) / 2: eng.discard(cc); log(f'dropped {label}')
             cur[k] = p[mod][pid]
 def loop():
-    t = 0
+    t, failed = 0, set()
     while True:
         time.sleep(TICK)
         try:
@@ -65,8 +67,17 @@ def loop():
                 if seq['off'] and not held and time.time() - seq['release'] > RESUME: seq['off'] = False; pending[(ACID, 25)] = 1.0
                 batch = dict(pending); pending.clear()
             for mod in {k[0] for k in batch}:
-                S.call('vcvrack_set_params', {'moduleId': mod, 'params': [{'id': pid, 'value': v} for (m2, pid), v in batch.items() if m2 == mod]})
-            if time.time() - t > REFRESH: refresh(); t = time.time()
+                items = {k: v for k, v in batch.items() if k[0] == mod}
+                try: S.call('vcvrack_set_params', {'moduleId': mod, 'params': [{'id': pid, 'value': v} for (_, pid), v in items.items()]})
+                except Exception as e:                          # keep the values for the next tick (newer ones win), log once per outage
+                    with lock:
+                        for k, v in items.items(): pending.setdefault(k, v)
+                    if mod not in failed: log(f'set_params: module {mod} failed ({str(e)[:80]}), retrying')
+                    failed.add(mod)
+                else: failed.discard(mod)
+            if time.time() - t > REFRESH:
+                try: refresh()
+                finally: t = time.time()
         except Exception: LOG.write(traceback.format_exc())
 open(MLSTOP, 'w').close(); time.sleep(1.5)    # minilab.py lets go of the MiniLab
 inp = None
@@ -76,7 +87,9 @@ for _ in range(20):
 if os.path.exists(MLSTOP): os.remove(MLSTOP)
 if inp is None: log('MiniLab not available (still held by minilab.py?)'); sys.exit(1)
 open(os.path.join(here, 'minilab.mode'), 'w').write('acid')      # the page labels the MiniLab for this program
-refresh(); threading.Thread(target=loop, daemon=True).start()
+try: refresh()
+except Exception: LOG.write(traceback.format_exc())
+threading.Thread(target=loop, daemon=True).start()
 log('start: keys play the bass, pads = acid patterns, faders cutoff/res/env/decay, knobs incl. arp gate / brightness / transpose')
 while not os.path.exists(STOP): time.sleep(0.25)
 inp.close()

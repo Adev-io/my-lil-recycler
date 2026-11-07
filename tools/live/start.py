@@ -39,7 +39,7 @@ if ml_pids():
         if not ml_pids(): break
         time.sleep(0.25)
 if os.path.exists(MLSTOP): os.remove(MLSTOP)
-# the MiniLab program for the saved mode (minilab.mode: mix = drums + mix map, acid = Acid Bass); pads.py does the swap,
+# the MiniLab program for the saved mode (minilab.mode: mix = drums + mix map, acid = Synths); pads.py does the swap,
 # the same as its Drums / Keys buttons. Switch later with those buttons or on the page.
 import json, urllib.request
 MF = os.path.join(here, 'minilab.mode'); m = open(MF).read().strip() if os.path.exists(MF) else 'mix'
