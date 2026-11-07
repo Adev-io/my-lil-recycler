@@ -10,6 +10,7 @@ CR = r'C:\Users\Arikl\Desktop\uvr-loops\crates\lowdown2-crate'; CRB = r'C:\Users
 U = 0.707; DR = 0.80                                     # mixer unity; drums strip after the balance pass (+2 dB)
 CHOP_V = CR.replace('\\', '/') + '/6-vocals-14-115bpm-chop4.wav'; CHOP_G = CR.replace('\\', '/') + '/3-guitar-14-115bpm-chop4.wav'
 HORNS = CR.replace('\\', '/') + '/5-other-16-115bpm.wav'
+VC = 'C:/Users/Arikl/Desktop/uvr-loops/crates/vocal-cuts/'      # vocal_cuts.py: first words, verse and roll pads (4 bars, pinned; outside the deck crates)
 # deck slots: 1 bass stem, 2 piano, 3 guitar, 4 vocals. levels = (bass, piano, guitar, vocals). strips = (drums, acid, deck A, deck B).
 # Acid: 10 = I-B3 (Lowdown E/A vamp), 14 = I-B7 (Time Out Of Mind A vamp), 16 = I-C1 (TOOM walk-down).
 SECTIONS = [
@@ -71,7 +72,9 @@ if __name__ == '__main__':
 # pad pressed again mutes the row. Rows play together on deck A's loop grid. Samples only: Drums and Acid strips stay 0.
 P = lambda f: CR.replace('\\', '/') + '/' + f
 ROWS = {
-    81: dict(name='vocals', slot=3, level=1.0, color=53, samples=[CHOP_V, P('6-vocals-14-115bpm.wav')]),   # Ari kept pads 1-2 (09:10); 15, 16, 11, 03, 06, 07 dropped
+    81: dict(name='vocals', slot=3, level=1.0, color=53,               # Ari kept pads 1-2 (09:10); 2026-11-06 + the first verse he sings and rolls
+             samples=[CHOP_V, P('6-vocals-14-115bpm.wav'), VC + '6-vocals-02_verse-115bpm-chop4.wav', P('6-vocals-03-115bpm.wav'),
+                      VC + '6-vocals-02_build-115bpm-chop4.wav', VC + '6-vocals-03_heyboy-115bpm-chop4.wav']),   # "Baby's into running around...", verse 03, "Baby's" roll build, "Hey boy" roll
     71: dict(name='keys',   slot=1, level=1.2, color=45, samples=[P(f'4-piano-{n}-115bpm.wav') for n in ('14', '15', '16', '13', '03', '09', '10', '17')]),
     61: dict(name='bridge keys', slot=1, level=1.2, color=21,          # same slot as keys: a bridge pad swaps the row 2 piano out
              samples=[P(f'4-piano-{n}-115bpm-chop4.wav') for n in ('08', '09', '10', '13')]),   # 4-bar bridge halves: 08 C#-C-B-G#, 09/10 F#-B, 13 D-C#-C-A#
@@ -91,7 +94,9 @@ ROWS = {
 # pad replaces the Lowdown drums at the next loop start (toom-crate re-cut on the kick since the old set's groove trouble).
 Q = lambda stem, *nn: [CRB.replace('\\', '/') + '/' + next(f for f in os.listdir(CRB) if re.match(rf'\d-{stem}-{n}_', f)) for n in nn]
 ROWS_TOOM = {
-    81: dict(name='vocals', slot=3, level=1.0, color=53, deck=B, samples=Q('vocals', '05', '02', '03', '06', '11', '12', '04', '07')),
+    81: dict(name='vocals', slot=3, level=1.0, color=53, deck=B,       # 2026-11-06: "Son" roll build -> "Son, you better be ready for love" -> verses -> "Time" roll -> choruses
+             samples=[VC + '6-vocals-02_build-124bpm-chop4.wav', VC + '6-vocals-02_first-124bpm-chop4.wav', *Q('vocals', '02', '03', '05'),
+                      VC + '6-vocals-04_time-124bpm-chop4.wav', *Q('vocals', '04', '07')]),   # 06, 11 (near empty), 12 dropped for room
     71: dict(name='piano',  slot=1, level=1.0, color=45, deck=B, samples=Q('piano', '05', '02', '03', '06', '12', '04', '07', '01')),
     61: dict(name='horns',  slot=2, level=1.0, color=9,  deck=B, samples=Q('other', '05', '02', '03', '06', '04', '07', '15', '01')),
     51: dict(name='guitar', slot=2, level=1.0, color=21, deck=B, samples=Q('guitar', '05', '02', '03', '06', '04', '07')),

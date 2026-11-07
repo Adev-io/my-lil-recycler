@@ -6,7 +6,9 @@ for pg in S.PAGES:
         assert all(b + i <= b + 7 for i in range(len(l))), (r['name'], 'more than 8 pads')
 assert S.PAGES[2]['synth'] and not S.PAGES[2]['rows'] and S.PAGES[2]['name'] == 'Synths', S.PAGES[2]   # page 3: Synths, no sample rows
 assert maps.pad_labels(S.ROWS_TOOM[71]['samples'])[:2] == ['05 verse', '02 verse']
-assert maps.pad_labels(S.ROWS[81]['samples']) == ['14 chop', '14'], maps.pad_labels(S.ROWS[81]['samples'])
+assert maps.pad_labels(S.ROWS[81]['samples'])[:2] == ['14 chop', '14'], maps.pad_labels(S.ROWS[81]['samples'])   # Ari's two pads stay first
+import os
+assert all(os.path.exists(p) for pg in S.PAGES for r in pg['rows'].values() for p in r['samples']), 'a pad points at a missing file'
 assert maps.pad_labels(S.ROWS[31]['samples'])[:3] == ['strings 08', 'strings 13', 'full 08']
 E = maps.MODES['env']                                                       # Acid Env (Launchpad User button): filter + amp ADSR
 assert set(E['cc']) == set(maps.KNOBS + maps.FADERS) and E['title'] == 'Acid Env', sorted(E['cc'])
