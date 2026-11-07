@@ -15,15 +15,15 @@ def set_filters(v):                    # v = 9 values in BASE order
     S.call('vcvrack_set_params', {'moduleId': C, 'params': [{'id': 24, 'value': v[4]}]})
     S.call('vcvrack_set_params', {'moduleId': S.B, 'params': [{'id': 24 + k, 'value': v[5 + k]} for k in range(4)]})
 def reverse(on, decks=None):          # music decks only (reversed drums lose the groove); default all three songs, the moves row passes one
-    for deck in (decks or (S.A, S.B, S.D)): S.call('vcvrack_set_params', {'moduleId': deck, 'params': [{'id': 36 + k, 'value': 1.0 if on else 0.0} for k in range(4)]})
+    for deck in (decks or (S.A, S.B, S.D, *S.SONG_DECKS)): S.call('vcvrack_set_params', {'moduleId': deck, 'params': [{'id': 36 + k, 'value': 1.0 if on else 0.0} for k in range(4)]})
 def strip(k, on):                      # Mixer strip k (2 = deck A music, 3 = deck B music, 4 = deck C drums, 7 = deck D music): unity or silent
-    S.call('vcvrack_set_params', {'moduleId': S.MIX, 'params': [{'id': k, 'value': S.U if on else 0.0}]})
+    set_strip_map({k: S.U if on else 0.0})
 def clean(song=None):                  # song: the song playing (pads.py PLAY). A strip that rests at 0 (deck D) opens if its song plays, else
     set_filters(BASE); set_deck_filters(S.D, BASEF[S.D]); reverse(False); strip(2, True); strip(3, True); strip(4, True)   # back to rest: a transition
     if song is not None:                                            # cut off mid-fade leaves no strip part-open. None: deck D's strip left as is
-        S.call('vcvrack_set_params', {'moduleId': S.MIX, 'params': [{'id': STRIP[d], 'value': S.U if own_deck(song) == d else r} for d, r in REST.items()]})
+        set_strip_map({STRIP[d]: S.U if own_deck(song) == d else r for d, r in REST.items()})
     err = None                                                      # no Recycler STUT left held (a break & drop cut off), each deck on its own
-    for d in (S.A, S.B, S.D, C):
+    for d in (S.A, S.B, S.D, C, *S.SONG_DECKS):
         try: S.call('vcvrack_set_params', {'moduleId': d, 'params': [{'id': STUT + k, 'value': 0.0} for k in range(4)]})
         except Exception as e: err = err or e
     if song is not None:                                            # and the arp on the playing song's keys (one read; a write only if off)
@@ -35,9 +35,9 @@ def clean(song=None):                  # song: the song playing (pads.py PLAY). 
 # Per song (2026-11-06, Ari: "sweep is only for samples ... a sweep up and down for each [song]" + "a transition from one song
 # to another"). A song = its own deck (page 1 Lowdown = A, page 2 Time Out Of Mind = B, page 3 Disco Ulysses = D, sections.PAGES
 # 'deck') + deck C while its drums row plays.
-STRIP = {S.A: 2, S.B: 3, C: 4, S.D: 7}                             # Mixer strip per deck
-BASEF = {S.A: BASE[0:4], C: BASE[4:5], S.B: BASE[5:9], S.D: [0.0] * 4}   # resting filters per deck (deck C: its drums slot only)
-REST = {S.D: 0.0}                                                  # strip level a deck rests at after a transition out (else unity)
+STRIP = {S.A: 2, S.B: 3, C: 4, S.D: 7, **{x['deck']: x['strip'] for x in S.SONGS['songs']}}   # Mixer strip per deck (8+ = Mixer 2, songs 4+)
+BASEF = {S.A: BASE[0:4], C: BASE[4:5], S.B: BASE[5:9], S.D: [0.0] * 4, **{d: [0.0] * 4 for d in S.SONG_DECKS}}   # resting filters per deck (deck C: its drums slot only)
+REST = {S.D: 0.0, **{d: 0.0 for d in S.SONG_DECKS}}                                                  # strip level a deck rests at after a transition out (else unity)
 FIRST = (71, 41, 21)                                               # silent song on show: break & drop brings in pad 1 of these rows
 def heard(mix, paths):                                             # song page -> its strip level, for the songs you hear: strip open and a
     out = {}                                                       # row on its own deck playing (paths: pads.py state['path'], per page row -> sample)
@@ -70,7 +70,13 @@ def move_for(frm, to):
     if (frm, to) in MOVES: return MOVES[(frm, to)]
     return ('blend', 16) if S.SCALES.get(frm) == S.SCALES.get(to) else ('break_drop', 4)
 def smooth(x): x = min(1.0, max(0.0, x)); return x * x * (3 - 2 * x)
-def put(w):                            # {module: {param: value}}: one set_params per module
+def mixw(m):                           # strip map {k: v} -> {module: {param: v}}: strips 0-7 = the Mixer, 8-15 = Mixer 2 (songs 4+)
+    w = {}
+    for k, v in m.items(): w.setdefault(S.MIX if k < 8 else S.MIX2, {})[k % 8] = v
+    return w
+def put(w):                            # {module: {param: value}}: one set_params per module; S.MIX entries are strip maps (routed by mixw)
+    w = dict(w); mx = w.pop(S.MIX, None) or {}
+    for m, ps in mixw(mx).items(): w[m] = {**w.get(m, {}), **ps}
     for m, ps in w.items():
         if ps: S.call('vcvrack_set_params', {'moduleId': m, 'params': [{'id': k, 'value': v} for k, v in ps.items()]})
 def clock_gate():                      # Clocked master clock out (one pulse a beat: every deck and My lil Drums run on it), volts
@@ -257,9 +263,10 @@ DNB_KEEP = (0, 1)                      # Mixer strips kept: 0 My lil Drums, 1 Ac
 def bpm(v=None):
     if v is None: return next(p['value'] for p in json.loads(S.call('vcvrack_get_params', {'moduleId': CLOCK})) if p['id'] == 0)
     S.call('vcvrack_set_params', {'moduleId': CLOCK, 'params': [{'id': 0, 'value': round(v, 2)}]})
-def strips(): return [p['value'] for p in json.loads(S.call('vcvrack_get_params', {'moduleId': S.MIX})) if p['id'] < 8]   # 8 strip levels
-def set_strip_map(m): S.call('vcvrack_set_params', {'moduleId': S.MIX, 'params': [{'id': k, 'value': v} for k, v in m.items()]})
-def set_strips(v): S.call('vcvrack_set_params', {'moduleId': S.MIX, 'params': [{'id': k, 'value': x} for k, x in enumerate(v)]})
+def strips():                          # strip levels: the Mixer's 8, then Mixer 2's 8 when songs 4+ are in the rig
+    return [p['value'] for m in (S.MIX, S.MIX2) if m for p in json.loads(S.call('vcvrack_get_params', {'moduleId': m})) if p['id'] < 8]
+def set_strip_map(m): put({S.MIX: m})
+def set_strips(v): set_strip_map(dict(enumerate(v)))
 def ramp(to_bpm, to_strips, secs, alive):          # eased move from where the rig is now; False if another press took over
     b0, s0, t0 = bpm(), strips(), time.time()
     while True:

@@ -28,7 +28,7 @@ PAGEF = os.path.join(S.here, 'page.txt')                               # the son
 def page_now():
     try: return int(open(PAGEF).read().strip())
     except (OSError, ValueError): return 0
-SONG_PARTS = [('vocals', 'keys', 'horns', 'bass'), ('vocals', 'piano', 'guitar/horns', 'bass'), ('horns/synth', 'piano', 'guitar', 'bass')]   # slots 3, 1, 2, 0 per page
+SONG_PARTS = [('vocals', 'keys', 'horns', 'bass'), ('vocals', 'piano', 'guitar/horns', 'bass'), ('horns/synth', 'piano', 'guitar', 'bass')] + [('vocals', 'piano', 'guitar/horns', 'bass')] * len(S.SONG_DECKS)   # slots 3, 1, 2, 0 per page; songs 4+ = sections.crate_rows
 def mix_map(page=None):   # drums + mix: faders / knobs 1-4 = the sample tracks of the song playing; drums the same on every song
     page = page_now() if page is None else page
     d, m = S.PAGES[page]['deck'], {}                                   # the song's own deck: A Lowdown, B TOOM, D Disco

@@ -1,11 +1,14 @@
 # Self-check for the virtual controller helpers in maps.py (no Rack needed): py -3.11 board_check.py
+import os; os.environ['LIVE_SONGS'] = ''                                    # the core set (3 songs); songs 4+ = songs_check.py
 import maps, sections as S
 for pg in S.PAGES:
     for b, r in sorted(pg['rows'].items(), reverse=True):
         l = maps.pad_labels(r['samples']); assert len(l) == len(r['samples']) and all(l), (r['name'], l); print(f'{pg["name"][:7]} {r["name"]:12s}', l)
         assert all(b + i <= b + 7 for i in range(len(l))), (r['name'], 'more than 8 pads')
-assert [p['name'] for p in S.PAGES] == ['Lowdown', 'Time Out Of Mind', 'Disco Ulysses', 'Synths'], [p['name'] for p in S.PAGES]   # Disco = page 3
-assert S.PAGES[3]['synth'] and not S.PAGES[3]['rows'] and [k for k, p in enumerate(S.PAGES) if p.get('synth')] == [3], S.PAGES[3]   # page 4: Synths, no sample rows
+SY = len(S.PAGES) - 1                                                            # the Synths page: last (page 4 + one per song 4+)
+assert [p['name'] for p in S.PAGES] == ['Lowdown', 'Time Out Of Mind', 'Disco Ulysses', *(x['name'] for x in S.SONGS['songs'] if os.path.isdir(x['crate'])), 'Synths'], [p['name'] for p in S.PAGES]   # Disco = page 3
+assert S.PAGES[SY]['synth'] and not S.PAGES[SY]['rows'] and [k for k, p in enumerate(S.PAGES) if p.get('synth')] == [SY], S.PAGES[SY]   # Synths last, no sample rows
+assert [p['deck'] for p in S.PAGES[3:SY]] == S.SONG_DECKS and all(S.ACID_SONG[k] == S.ACID_SONG[1] for k in range(3, SY))   # songs 4+: TOOM acid set (scales: songs_check)
 assert [p.get('deck') for p in S.PAGES[:3]] == [S.A, S.B, S.D] and S.D not in (S.A, S.B, S.ACID, S.MIX, S.DRUMS), S.D   # each song page names its own deck
 assert maps.pad_labels(S.ROWS_TOOM[71]['samples'])[:2] == ['05 verse', '02 verse']
 assert maps.pad_labels(S.ROWS[81]['samples'])[:2] == ['14 chop', '14'], maps.pad_labels(S.ROWS[81]['samples'])   # Ari's two pads stay first
@@ -408,7 +411,8 @@ assert m2[16] == m0[16] and m2[18] == m0[18] and [m2[c][1] for c in maps.KNOBS[:
 assert fx.own_deck(2) == S.D and fx.STRIP[S.D] == 7 and fx.BASEF[S.D] == [0.0] * 4 and fx.REST == {S.D: 0.0} and fx.own_deck(0) == S.A and fx.own_deck(1) == S.B
 assert fx.song_decks(2, [{}, {}, {21: 0}, {}]) == [S.D, fx.C] and fx.song_decks(2, [{}, {}, {}, {}]) == [S.D]
 HU = next(n for n in ast.parse(src_p).body if isinstance(n, ast.Assign) and getattr(n.targets[0], 'id', None) == 'HUSH')
-assert ast.literal_eval(HU.value) == {'drums only': (1, 2, 3, 5, 6, 7), 'no drums': (0, 4)}, ast.dump(HU.value)   # drums only silences deck D too
+HUV = eval(compile(ast.Expression(HU.value), 'pads.py', 'eval'), {'fx': fx, 'sections': S})
+assert HUV == {'drums only': (1, 2, 3, 5, 6, 7, *(fx.STRIP[d] for d in S.SONG_DECKS)), 'no drums': (0, 4)}, HUV   # drums only silences deck D + songs 4+ too
 sP = synths.pads(2); assert [sP[81 + i][2] for i in range(4)] == [14, 15, 16, 19] and 85 not in sP   # Synths acid row on Disco
 class Clock:                                                                  # fake time for fx (sleeps advance it); the set clock beats on it
     def __init__(s, t=1000.0, bpm=128.0): s.t, s.beat = t, 60.0 / bpm

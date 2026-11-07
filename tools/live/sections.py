@@ -123,6 +123,28 @@ ROWS_DISCO = {
     21: dict(name='drums',  slot=0, level=1.0, color=13, deck=ROWS[21]['deck'], samples=QD('drums', '08', '13', '05', '06', '03', '14', '09', '10')),   # 09-10 break: half-time kicks
 }
 PAGES = [dict(name='Lowdown', rows=ROWS, deck=A), dict(name='Time Out Of Mind', rows=ROWS_TOOM, deck=B), dict(name='Disco Ulysses', rows=ROWS_DISCO, deck=D)]   # deck = the song's own deck
+# 2026-11-07 songs 4+ (Ari: "add as next song", "make sure all timestretched and pitched to work together"): each on its own
+# Recycler deck whose ROOT = D major, so the Recycler shifts the song by the nearest way into D major (a minor song: B minor), all
+# decks on the set clock. Their strips sit on Mixer 2 (strip 8 here = its strip 1; Mixer 2 out -> the Mixer's return 2) and rest at 0
+# like Disco's. songs.json (songs_add.py): {MIX2, songs: [{name, crate, deck, strip}]}; a song whose crate is not cut yet has no page.
+# Rows come from the crate (song_crate.py names): vocals 3, piano 1, horns/synth + guitar 2, bass 0, drums = deck C slot 0.
+SONGF = os.environ.get('LIVE_SONGS', os.path.join(here, 'songs.json'))   # LIVE_SONGS='' = none (board_check), a path = that file (songs_check)
+SONGS = json.load(open(SONGF)) if os.path.exists(SONGF) else {'MIX2': None, 'songs': []}
+MIX2 = SONGS['MIX2']
+def crate_rows(crate, deck):                                   # up to 8 loops a row, spread over the song; intro / outro loops last
+    files, base = sorted(f for f in os.listdir(crate) if f.endswith('.wav')), crate.replace(chr(92), '/') + '/'
+    def pick(stem):
+        fs = [f for f in files if re.match(rf'\d-{stem}-\d\d_', f)]; mid = [f for f in fs if not re.search(r'_(intro|outro)-', f)]
+        if len(mid) > 8: mid = [mid[round(i * (len(mid) - 1) / 7)] for i in range(8)]
+        return [base + f for f in (mid + [f for f in fs if f not in mid])[:8]]
+    spec = ((81, 'vocals', 'vocals', 3, 53), (71, 'piano', 'piano', 1, 45), (61, 'horns/synth', 'other', 2, 9), (51, 'guitar', 'guitar', 2, 21), (41, 'bass', 'bass', 0, 37))
+    rows = {b: dict(name=n, slot=k, level=1.0, color=c, deck=deck, samples=pick(st)) for b, n, st, k, c in spec if pick(st)}
+    if pick('drums'): rows[21] = dict(name='drums', slot=0, level=1.0, color=13, deck=ROWS[21]['deck'], samples=pick('drums'))
+    return rows
+for _s in SONGS['songs']:
+    if os.path.isdir(_s['crate']) and any(f.endswith('.wav') for f in os.listdir(_s['crate'])):
+        PAGES.append(dict(name=_s['name'], rows=crate_rows(_s['crate'], _s['deck']), deck=_s['deck']))
+SONG_DECKS = [p['deck'] for p in PAGES[3:]]                    # the decks of songs 4+ (with a page), in page order
 # Arp keys per song page (pitch classes, C = 0). scale_scan.py 2026-11-06: both songs' bass sits in D major (D E F# G A B C#).
 # Disco Ulysses: recorded in B major (the crate's pin, key 11); 2026-11-07 Ari: into TOOM's key -> deck D ROOT = D, the Recycler
 # renders every Disco loop +3 semitones (drums unshifted), so it is D major like the others (was B major, mask 3418).
@@ -134,6 +156,8 @@ SCALES = {0: (1, 2, 4, 6, 7, 9, 11), 1: (1, 2, 4, 6, 7, 9, 11), 2: (1, 2, 4, 6, 
 # and 12 (F#/B pump) sit inside B major; 2 (E D F# B, starts on E like the record's bar 1) and 22 (C# D F# B) add only D natural,
 # the blue note of the record's own verse riff. No vamp for this song: the tonic pattern goes first.
 ACID_SONG = {0: [10, 8, 9], 1: [14, 15, 16, 19], 2: [14, 15, 16, 19]}   # Disco now in D (ROOT = D): TOOM's set; its B-major set was [25, 12, 2, 22]
+for _k, _s in zip(range(3, len(PAGES)), [x for x in SONGS['songs'] if any(p.get('deck') == x['deck'] for p in PAGES)]):   # songs 4+: the major scale
+    SCALES[_k] = tuple(sorted((_s.get('root', 2) + i) % 12 for i in (0, 2, 4, 5, 7, 9, 11))); ACID_SONG[_k] = ACID_SONG[1]   # of the deck ROOT (D default); TOOM acid
 PAGES.append(dict(name='Synths', rows={}, synth=True))   # page 4: arp + acid controls (synths.py); it and its moves act on the song playing
 def base(strips=True):                                         # deck A + deck B strips; deck A slots without a row silent (strips=False: mixer strips untouched, a crash respawn)
     mix = {p['id']: p['value'] for p in json.loads(call('vcvrack_get_params', {'moduleId': MIX}))}
@@ -141,6 +165,10 @@ def base(strips=True):                                         # deck A + deck B
         call('vcvrack_set_params', {'moduleId': B, 'params': [{'id': 14 + k, 'value': 0.0} for k in range(4)]})
     if mix[7] < 0.05:                                          # deck D (Disco) closed: its slots silent; its strip stays where it is
         call('vcvrack_set_params', {'moduleId': D, 'params': [{'id': 14 + k, 'value': 0.0} for k in range(4)]})   # (rests at 0: transition opens it)
+    if MIX2 and SONG_DECKS:                                    # songs 4+: a deck whose Mixer 2 strip is closed starts silent too
+        m2 = {p['id']: p['value'] for p in json.loads(call('vcvrack_get_params', {'moduleId': MIX2}))}
+        for d in SONG_DECKS:
+            if m2[next(x['strip'] for x in SONGS['songs'] if x['deck'] == d) - 8] < 0.05: call('vcvrack_set_params', {'moduleId': d, 'params': [{'id': 14 + k, 'value': 0.0} for k in range(4)]})
     if strips: call('vcvrack_set_params', {'moduleId': MIX, 'params': [{'id': k, 'value': v} for k, v in enumerate((0.0, 0.0, U, U))] + [{'id': 40 + k, 'value': 0} for k in range(4)]})
     rows = {r['slot'] for r in ROWS.values()}
     call('vcvrack_set_params', {'moduleId': A, 'params': [{'id': 14 + k, 'value': 0.0} for k in range(4) if k not in rows]})

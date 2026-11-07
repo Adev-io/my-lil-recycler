@@ -1,0 +1,26 @@
+{
+ "MIX2": 4787323873250880,
+ "songs": [
+  {
+   "name": "Together",
+   "crate": "C:\\Users\\Arikl\\Desktop\\uvr-loops\\crates\\together-crate",
+   "deck": 2675094110691155,
+   "strip": 8,
+   "root": 2
+  },
+  {
+   "name": "Pusherman",
+   "crate": "C:\\Users\\Arikl\\Desktop\\uvr-loops\\crates\\pusherman-crate",
+   "deck": 1799080423081381,
+   "strip": 9,
+   "root": 7
+  },
+  {
+   "name": "Rainmaker",
+   "crate": "C:\\Users\\Arikl\\Desktop\\uvr-loops\\crates\\rainmaker-crate",
+   "deck": 4034454357992373,
+   "strip": 10,
+   "root": 2
+  }
+ ]
+}

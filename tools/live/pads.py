@@ -22,7 +22,7 @@ STOP = os.path.join(here, 'pads.stop')
 state = {'on': [{} for _ in sections.PAGES], 'page': 0, 'busy': False, 'fx': set(), 'gen': 0, 'dgen': 0, 'snap': None, 'hw': False, 'swept': [], 'tgen': 0, 'hush': {}, 'bank': 0, 'saved': {}, 'agen': 0, 'machine': True, 'fgen': 0, 'fading': False, 'acts': 0,
          'song': 0, 'held': set(), 'auto': set(), 'phrase': 8, 'egen': {}, 'edir': {}, 'slit': set(), 'down': set(), 'vox': {},   # egen / edir: per entry move (acid, arp); vox: fx.vox_on
          'rowpage': {}, 'path': [{} for _ in sections.PAGES], 'tthread': None}   # tthread: the transition move running; rowpage: (page, row) -> row page on show (sections.pages index); path: per page row -> sample playing
-HUSH = {'drums only': (1, 2, 3, 5, 6, 7), 'no drums': (0, 4)}    # Mixer strips each move silences: drums only = Acid, decks A/B,
+HUSH = {'drums only': (1, 2, 3, 5, 6, 7, *(fx.STRIP[d] for d in sections.SONG_DECKS)), 'no drums': (0, 4)}    # Mixer strips each move silences: drums only = Acid, decks A/B,
                                                                  # Acid Voice, Triple, deck D; no drums = My lil Drums + the drum stem
 lp = lambda names, pre: next((x for x in names if x.startswith(pre)), None)        # Launchpad unplugged -> page only
 lock = threading.Lock()                                          # Launchpad sends AND closes happen under it: send on a closed rtmidi port = segfault
