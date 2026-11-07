@@ -16,9 +16,18 @@ HUSH = {'drums only': (1, 2, 3, 5, 6), 'no drums': (0, 4)}       # Mixer strips 
 lp = lambda names, pre: next((x for x in names if x.startswith(pre)), None)        # Launchpad unplugged -> page only
 out = lp(mido.get_output_names(), 'MIDIOUT2 (LPMiniMK3'); out = out and mido.open_output(out); state['hw'] = bool(out)
 lock = threading.Lock()
-def led(note, vel, ch=0):
-    if out:
-        with lock: out.send(mido.Message('note_on', channel=ch, note=note, velocity=vel))
+def lp_send(msg):                                               # every Launchpad send goes through here: a lost port (Windows re-enumerates
+    global out                                                  # MIDI when another device is replugged) must not kill pads.py; the 5 s refresh reopens it
+    o = out
+    if not o: return
+    try:
+        with lock: o.send(msg)
+    except Exception as e:
+        try: o.close()
+        except Exception: pass
+        if out is o:                                            # several threads can fail on the same port: log once
+            out = None; state['hw'] = False; LOG.write(time.ctime() + f' launchpad output lost: {e}; retrying\n')
+def led(note, vel, ch=0): lp_send(mido.Message('note_on', channel=ch, note=note, velocity=vel))
 R = lambda: sections.PAGES[state['page']]['rows']                # rows of the page on show
 ON = lambda: state['on'][state['page']]                          # row -> playing index, for that page
 ARROWS = {93: -1, 94: 1}                                         # top row: left / right arrow (programmer mode CC)
@@ -59,13 +68,11 @@ def paint():
     for n, name in MOVES().items():
         if name in state['fx']: led(n, 0); led(n, 45, ch=1)
         else: led(n, fx.COLOR)
-    if out:
-        with lock: out.send(mido.Message('control_change', control=fx.BANK_CC, value=fx.COLOR if state['bank'] else 1))   # lit = bank 2
-        with lock: out.send(mido.Message('control_change', control=MACHINE_CC, value=13 if state['machine'] else 1))      # yellow = machine on
-        for cc, d in ARROWS.items():
-            with lock: out.send(mido.Message('control_change', control=cc, value=3 if 0 <= state['page'] + d < len(sections.PAGES) else 0))
-        for cc, m in MODE_CC.items():                                # the MiniLab mode on show: lit cyan, the other dim
-            with lock: out.send(mido.Message('control_change', control=cc, value=37 if mode_now() == m else 1))
+    cc_ = lambda c, v: lp_send(mido.Message('control_change', control=c, value=v))
+    cc_(fx.BANK_CC, fx.COLOR if state['bank'] else 1)           # lit = bank 2
+    cc_(MACHINE_CC, 13 if state['machine'] else 1)              # yellow = machine on
+    for cc, d in ARROWS.items(): cc_(cc, 3 if 0 <= state['page'] + d < len(sections.PAGES) else 0)
+    for cc, m in MODE_CC.items(): cc_(cc, 37 if mode_now() == m else 1)   # the MiniLab mode on show: lit cyan, the other dim
 def turn(d):                                                    # arrow: next / previous page (pads only)
     p = state['page'] + d
     if not 0 <= p < len(sections.PAGES) or state['busy']: return False
@@ -211,7 +218,21 @@ LOG.write(time.ctime() + f" start rows {state['on']} fx row {list(fx.FX.values()
 while not os.path.exists(STOP):
     time.sleep(0.25)
     if time.time() - t > 5:                                      # re-read the rig: rows brought in or out elsewhere (MiniLab, page
-        try:                                                     # faders, Rack itself) light up or go dark on both pages too
+        if not out:                                              # Launchpad output lost: reopen when it is back (failure = wait for the next refresh)
+            try:
+                nm = lp(mido.get_output_names(), 'MIDIOUT2 (LPMiniMK3')
+                if nm: out = mido.open_output(nm); state['hw'] = True; LOG.write(time.ctime() + ' launchpad output back\n'); paint()
+            except Exception: pass
+        try:                                                     # same for the input: gone from the port list = close, reopen when listed
+            if inp is None or getattr(inp, 'name', None) not in mido.get_input_names():
+                if inp is not None:
+                    try: inp.close()
+                    except Exception: pass
+                    inp = None; LOG.write(time.ctime() + ' launchpad input lost; retrying\n')
+                nm = lp(mido.get_input_names(), 'LPMiniMK3 MIDI')
+                if nm: inp = mido.open_input(nm, callback=on_msg); LOG.write(time.ctime() + ' launchpad input back\n')
+        except Exception: pass
+        try:                                                    # faders, Rack itself) light up or go dark on both pages too
             n0 = state['acts']; fresh = [sections.now(p['rows']) for p in sections.PAGES]
             if not state['busy'] and state['acts'] == n0: state['on'] = fresh   # a press during the read wins: that snapshot is stale
             state['machine'] = next(x['value'] for x in sections.json.loads(sections.call('vcvrack_get_params', {'moduleId': sections.DRUMS})) if x['id'] == 5) > 0.001
@@ -220,6 +241,8 @@ while not os.path.exists(STOP):
                 state['fx'] = (state['fx'] | {name}) if cur[k] > 0.001 else (state['fx'] - {name})
         except Exception: LOG.write(traceback.format_exc())
         paint(); t = time.time()
-if inp: inp.close()
+try: inp and inp.close()
+except Exception: pass
 for n in range(11, 90): led(n, 0)
-if out: out.close()
+try: out and out.close()
+except Exception: pass
