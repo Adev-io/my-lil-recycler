@@ -14,6 +14,7 @@ def params(mods):                                       # Rack params per module
             for m in mods:                                  # a module that fails reads as {}: its controls show unavailable, the page stays up
                 try: cache['p'][m] = {x['id']: x['value'] for x in json.loads(S.call('vcvrack_get_params', {'moduleId': m}))}
                 except Exception: cache['p'][m] = {}
+            if not any(cache['p'].values()): raise RuntimeError('Rack not answering')   # every module failed: /state says rack:false (cache['t'] stays stale)
             cache['t'] = time.time()
         return cache['p']
 def mode():

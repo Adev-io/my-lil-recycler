@@ -26,7 +26,7 @@ def on_msg(m):
         mod, pid, f, label = MAP[m.control]; v = f(m.value); k = (mod, pid); tol = TOLS.get(k, TOL)
         with lock:
             c, p = cur.get(k), prev.get(m.control)
-            if m.control not in eng and (c is None or abs(v - c) <= tol or (p is not None and (p - c) * (v - c) < 0)):
+            if m.control not in eng and k in cur and (abs(v - c) <= tol or (p is not None and (p - c) * (v - c) < 0)):   # no pickup until refresh has read the module
                 eng.add(m.control); log(f'picked up {label} at {v}')
             prev[m.control] = v
             if m.control in eng: pending[k] = v; cur[k] = v
@@ -59,7 +59,7 @@ def refresh():                                # Rack's values; a control whose v
             if cc in eng and abs(p[mod][pid] - cur.get(k, p[mod][pid])) > TOLS.get(k, TOL) / 2: eng.discard(cc); log(f'dropped {label}')
             cur[k] = p[mod][pid]
 def loop():
-    t, failed = 0, set()
+    t, failed, retry = 0, set(), {}
     while True:
         time.sleep(TICK)
         try:
@@ -68,12 +68,16 @@ def loop():
                 batch = dict(pending); pending.clear()
             for mod in {k[0] for k in batch}:
                 items = {k: v for k, v in batch.items() if k[0] == mod}
+                if time.time() < retry.get(mod, 0):                # a failed module is tried again at most once a second
+                    with lock:
+                        for k, v in items.items(): pending.setdefault(k, v)
+                    continue
                 try: S.call('vcvrack_set_params', {'moduleId': mod, 'params': [{'id': pid, 'value': v} for (_, pid), v in items.items()]})
                 except Exception as e:                          # keep the values for the next tick (newer ones win), log once per outage
                     with lock:
                         for k, v in items.items(): pending.setdefault(k, v)
                     if mod not in failed: log(f'set_params: module {mod} failed ({str(e)[:80]}), retrying')
-                    failed.add(mod)
+                    failed.add(mod); retry[mod] = time.time() + 1.0
                 else: failed.discard(mod)
             if time.time() - t > REFRESH:
                 try: refresh()

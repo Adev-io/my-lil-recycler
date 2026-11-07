@@ -15,7 +15,7 @@ ACID = {   # MiniLab "Synths" (Keys button): Acid Bass, plus the arp's gate (kno
     16: (S.ACID, 28, lambda v: float(round((v - 64) / 64 * 12)), 'transpose'),     # Acid TRANSPOSE: the arp follows it
     19: (S.ACID, 27, lambda v: 1.0 + round(v / 127 * 31), 'pattern length'),
 }
-ACID_TOLS = {(S.ACID, 28): 1.0, (S.ACID, 27): 1.0, (TRI, 28): 0.15}                       # stepped params: within one step counts as caught
+ACID_TOLS = {(S.ACID, 28): 1.0, (S.ACID, 27): 1.0, (TRI, 28): 0.15}                       # pickup widths: stepped params within one step count as caught; Triple cutoff (log2 Hz) within 0.15
 TOP = 1.5                                                               # fader at the top = Recycler level 1.5 (max 2.0)
 fader = lambda v: round(v / 127 * TOP, 3)
 knob = lambda v: round(max(-1.0, min(1.0, (v - 64) / 63)), 3)           # filter: centre off, left low-pass, right high-pass
