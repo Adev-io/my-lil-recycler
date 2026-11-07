@@ -56,8 +56,8 @@ def transition(page, on, alive):   # the song not on show sweeps up + fades out;
         set_deck_filters(d, BASEF[d]); S.call('vcvrack_set_params', {'moduleId': S.MIX, 'params': [{'id': STRIP[d], 'value': S.U}]})
     return True
 
-# Pad 16 'dnb' = drum + bass section: My lil Drums + Acid Bass only, tempo on an ADSR. Press: attack 120 -> peak, decay -> sustain,
-# held there. Press again: release back to 120 and every strip back where it was. Peak above sustain = overshoot then settle.
+# Pad 16 'dnb' = drum + bass section: My lil Drums + Acid Bass only, tempo on an ADSR. Press: attack from the set's tempo -> peak, decay -> sustain,
+# held there. Press again: release back to the tempo from before and every strip back where it was. Peak above sustain = overshoot then settle.
 import time
 CLOCK = json.load(open(os.path.join(S.here, 'clock.json')))['CLOCK']
 BPM = 120.0
@@ -84,8 +84,14 @@ def dnb_on(snap, alive):               # the break kicks in on the press
     S.drum_pattern(BREAK)
     keep = [v if k in DNB_KEEP else 0.0 for k, v in enumerate(snap['strips'])]
     if ramp(DNB['peak'], keep, DNB['attack'], alive) and DNB['decay'] > 0: ramp(DNB['sustain'], keep, DNB['decay'], alive)
-def dnb_off(snap, alive):              # the break rides the release down, then the old pattern returns
-    if ramp(snap.get('bpm', BPM), snap['strips'], DNB['release'], alive): S.drum_pattern(snap['drums'])
+def dnb_off(snap, alive):              # the break rides the release down, then the old pattern returns. True = it finished
+    if ramp(snap.get('bpm', BPM), snap['strips'], DNB['release'], alive): S.drum_pattern(snap['drums']); return True
+    return False
+def dnb_arm(state):                    # state['snap'] = the rig before the first dnb press; a release cut off mid-ramp keeps it, so the next press doesn't snapshot the half-way rig
+    if state['snap'] is None: state['snap'] = snapshot()
+    return state['snap']
+def dnb_release(state, alive):         # snapshot dropped once the release has finished (and is still the latest press)
+    if dnb_off(state['snap'], alive) and alive(): state['snap'] = None
 
 # Bank 2 (2026-11-06, Ari: the round button at the right end of the moves row flips to 8 more moves). pads.py keeps the toggles.
 FX2 = {11: 'acid in/out', 12: 'arp in/out', 13: 'voice in/out', 14: 'acid sweep', 15: 'break fill', 16: 'no bass', 17: 'no vocals', 18: 'breakdown'}

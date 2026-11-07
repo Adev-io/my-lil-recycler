@@ -60,7 +60,8 @@ def cutoff(v=None):
     rig['cut'] = v; sent.append(('cut', v))
 def fails(): raise RuntimeError('no rig')
 try:
-    synths.setp = lambda mid, vals: sent.append((mid, dict(vals)))
+    def put(mid, vals): rig[mid].update(vals); sent.append((mid, dict(vals)))                               # the stub writes the rig, so a read after a write sees it
+    synths.setp = put
     synths.getp = lambda mid: rig[mid]
     synths.arp_dir = lambda: 0; synths.arp_data = lambda **kv: sent.append(('data', kv))
     fx.acid_cutoff, fx.set_strip_map = cutoff, lambda m: sent.append(('strip', dict(m)))
@@ -99,10 +100,10 @@ try:
     synths.acid_out(lambda: rig['cut'] > 0.05 + 1e-9)                          # no strip down, no cutoff restore, _open kept for the newer one
     assert not any(k == 'strip' for k, _ in sent) and sent[-1][0] == 'cut' and abs(sent[-1][1] - 0.05) < 1e-9 and synths._open == {'cut': 0.4}, sent
     live = [True]                                                            # arp_in cut off during its roll: lets go of its own roll x4,
-    synths.setp = lambda mid, vals: (sent.append((mid, dict(vals))), vals.get(21) == 1.0 and live.__setitem__(0, False))   # then no gate write
+    synths.setp = lambda mid, vals: (put(mid, vals), vals.get(21) == 1.0 and live.__setitem__(0, False))   # then no gate write
     synths._open.clear(); sent.clear(); synths.arp_in(0.5, lambda: live[0]); i = sent.index((synths.ARP, {20: 4.0, 21: 1.0}))
     assert sent[i + 1:] == [(synths.ARP, {21: 0.0}), (synths.ARP, {20: 2.0})] and synths._open == {'gate': 0.6}, sent
-    synths.setp = lambda mid, vals: sent.append((mid, dict(vals)))
+    synths.setp = put
     rig[synths.ARP][21] = 1.0; synths._open.clear(); sent.clear(); synths.arp_in(0.5, lambda: True)   # arp roll fill held: no x4, no release
     assert not any(k == synths.ARP and 21 in v for k, v in sent) and synths._open == {}, sent
     del rig[synths.ARP][21]
@@ -118,7 +119,7 @@ try:                                                                            
     S.current_drum_pattern = lambda: now['pat']; S.drum_pattern = lambda p: now.__setitem__('pat', p); fx.STEP = 0.002
     snap = fx.snapshot(); assert snap['bpm'] == 128.0, snap
     now['bpm'], now['pat'] = 140.0, fx.BREAK; saved = dict(fx.DNB); fx.DNB['release'] = 0.02
-    try: assert fx.dnb_off(snap, lambda: True) is None
+    try: assert fx.dnb_off(snap, lambda: True) is True
     finally: fx.DNB.update(saved)
     assert now['bpm'] == 128.0 and now['pat'] == 3, now                         # release ends at 128
     now['bpm'], now['pat'] = 140.0, fx.BREAK; fx.restore(snap); assert now['bpm'] == 128.0 and now['pat'] == 3, now   # clean while dnb is on
@@ -127,6 +128,16 @@ try:                                                                            
     try: fx.dnb_off(old, lambda: True)
     finally: fx.DNB.update(saved)
     assert now['bpm'] == 120.0, now
+    state = {'snap': snap}; now['bpm'], now['pat'] = 140.0, fx.BREAK; n = [0]; cut = lambda: (n.__setitem__(0, n[0] + 1), n[0] <= 4)[1]   # release cut off mid-ramp,
+    fx.DNB['release'] = 0.05
+    try: fx.dnb_release(state, cut); assert 128.0 < now['bpm'] < 140.0 and now['pat'] == fx.BREAK and state['snap'] is snap, (now, state)
+    finally: fx.DNB.update(saved)
+    assert fx.dnb_arm(state) is snap and snap['bpm'] == 128.0 and snap['drums'] == 3, (snap, state)                    # dnb again: still the first snapshot, not the half-way rig
+    fx.DNB['release'] = 0.02
+    try: fx.dnb_release(state, lambda: True)                                                                          # a finished release drops it
+    finally: fx.DNB.update(saved)
+    assert state['snap'] is None and now['bpm'] == 128.0 and now['pat'] == 3, (now, state)
+    now['strips'] = [0.1] * 8; now['bpm'] = 131.0; assert fx.dnb_arm(state)['bpm'] == 131.0 and state['snap']['strips'] == [0.1] * 8   # next press snapshots fresh
 finally:
     fx.bpm, fx.strips, fx.set_strips, fx.STEP = (real_dnb[k] for k in ('bpm', 'strips', 'set_strips', 'STEP'))
     S.current_drum_pattern, S.drum_pattern = real_dnb['cdp'], real_dnb['dp']

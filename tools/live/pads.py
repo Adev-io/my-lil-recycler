@@ -144,10 +144,10 @@ def fx_act(name):
             fx.set_strip_map({k: 0.0 for k in HUSH[name]})
     elif name == 'dnb':
         state['dgen'] += 1; g = state['dgen']; alive = lambda: state['dgen'] == g
-        if name in state['fx']: state['fx'].discard(name); threading.Thread(target=fx.dnb_off, args=(state['snap'], alive), daemon=True).start()
+        if name in state['fx']: state['fx'].discard(name); threading.Thread(target=fx.dnb_release, args=(state, alive), daemon=True).start()
         else:
-            state['snap'] = fx.snapshot(); state['fx'].add(name)
-            threading.Thread(target=fx.dnb_on, args=(state['snap'], alive), daemon=True).start()
+            snap = fx.dnb_arm(state); state['fx'].add(name)
+            threading.Thread(target=fx.dnb_on, args=(snap, alive), daemon=True).start()
     elif name == 'transition':                                    # hand over to the song on show over 8 bars; runs once, blinks while it runs
         if name in state['fx']: return
         state['tgen'] += 1; g = state['tgen']; state['fx'].add(name)
@@ -227,7 +227,7 @@ def fx_act(name):
         for n in ('acid sweep', 'no bass', 'no vocals', 'breakdown'):
             if n in state['fx']: release(n)
         state['gen'] += 1; state['tgen'] += 1
-        if 'dnb' in state['fx']: state['dgen'] += 1; fx.restore(state['snap'])   # snap back to the tempo from before, strips + drum pattern as before
+        if 'dnb' in state['fx']: state['dgen'] += 1; fx.restore(state['snap']); state['snap'] = None   # snap back to the tempo from before, strips + drum pattern as before
         for n in list(state['hush']): fx.set_strip_map(state['hush'].pop(n))
         fx.clean(); state['fx'] = set()
     LOG.write(time.ctime() + f" fx {name} -> {sorted(state['fx'])}\n")
