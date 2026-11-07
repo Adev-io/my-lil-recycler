@@ -6,15 +6,17 @@ C = json.load(open(os.path.join(S.here, 'deckc.json')))['C']
 KNOBS, FADERS = (74, 71, 76, 77, 93, 18, 16, 19), (82, 83, 85, 17)        # hardware order: knob 1-8, fader 1-4 (factory map)
 
 lin = lambda v: round(v / 127, 3)
-ACID = {
+ARP = json.load(open(os.path.join(S.here, 'voice.json')))['ARP']
+TRI = json.load(open(os.path.join(S.here, 'triple.json')))['TRIPLE']
+ACID = {   # MiniLab "Synths" (Keys button): Acid Bass, plus the arp's gate (knob 4) and Triple's cutoff (knob 6)
     82: (S.ACID, 1, lin, 'cutoff'), 83: (S.ACID, 2, lin, 'resonance'), 85: (S.ACID, 3, lin, 'env mod'), 17: (S.ACID, 4, lin, 'decay'),
-    74: (S.ACID, 5, lin, 'accent'), 71: (S.ACID, 6, lin, 'volume'), 76: (S.ACID, 23, lin, 'gate length'), 77: (S.ACID, 22, lin, 'swing'),
-    93: (S.ACID, 15, lin, 'high-pass'), 18: (S.ACID, 7, lambda v: 1.0 if v >= 64 else 0.0, 'saw/square'),
-    16: (S.ACID, 0, lambda v: round((v - 64) / 64 * 12) * 100.0, 'transpose'),
+    74: (S.ACID, 5, lin, 'accent'), 71: (S.ACID, 6, lin, 'volume'), 76: (S.ACID, 23, lin, 'gate length'),
+    77: (ARP, 19, lambda v: round(0.05 + v / 127 * 0.9, 3), 'arp gate'),            # swing stays 0: Clocked already swings
+    93: (S.ACID, 15, lin, 'high-pass'), 18: (TRI, 28, lambda v: round(7.0 + v / 127 * 6.3, 3), 'arp bright'),   # 128 Hz .. 10 kHz (log2)
+    16: (S.ACID, 28, lambda v: float(round((v - 64) / 64 * 12)), 'transpose'),     # Acid TRANSPOSE: the arp follows it
     19: (S.ACID, 27, lambda v: 1.0 + round(v / 127 * 31), 'pattern length'),
 }
-ACID_TOLS = {0: 100.0, 7: 0.5, 27: 1.0}                                 # stepped params: within one step counts as caught
-
+ACID_TOLS = {(S.ACID, 28): 1.0, (S.ACID, 27): 1.0}                       # stepped params: within one step counts as caught
 TOP = 1.5                                                               # fader at the top = Recycler level 1.5 (max 2.0)
 fader = lambda v: round(v / 127 * TOP, 3)
 knob = lambda v: round(max(-1.0, min(1.0, (v - 64) / 63)), 3)           # filter: centre off, left low-pass, right high-pass
@@ -36,7 +38,7 @@ MIX = mix_map(0)
 ACID_NAMES = {10: 'Lowdown vamp', 14: 'TOOM vamp', 16: 'walk-down'}
 acid_name = lambda v: ACID_NAMES.get(v, f'I-{"ABCD"[v // 8]}{v % 8 + 1}')   # Acid Bass pattern index -> its bank name
 MODES = {                                                               # pads = (module, param, first value, pad count)
-    'acid': dict(title='Acid Bass', cc=ACID, pads=(S.ACID, 24, 8, 16), pad_label=acid_name,
+    'acid': dict(title='Synths', cc=ACID, pads=(S.ACID, 24, 8, 16), pad_label=acid_name,
                  keys='play the bass, 1 octave down · hold into the next key = slide · hit hard = accent'),
     'mix': dict(title='Drums + mix', cc=MIX, pads=(S.DRUMS, 3, 0, 8), pad_label=lambda v: f'beat {v + 1}',
                 keys='My lil Drums volume · far left silent → far right full'),

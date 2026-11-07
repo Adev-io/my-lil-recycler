@@ -148,7 +148,7 @@ try:
         g = get()['minilab']
         for ctl in g['knobs'] + g['faders']:
             if not ctl['label']: continue
-            cc = ctl['cc']; mod, pid, f, label = cmap[cc]; v0 = prm(mod, pid); tol = maps.ACID_TOLS.get(pid, 0.002) / 2 if mod == S.ACID else 0.002
+            cc = ctl['cc']; mod, pid, f, label = cmap[cc]; v0 = prm(mod, pid); tol = maps.ACID_TOLS.get((mod, pid), 0.002) / 2 if mod == S.ACID else 0.002
             post('/set', {'cc': cc, 'value': 0, 'log': False}); a = prm(mod, pid)
             post('/set', {'cc': cc, 'value': 127, 'log': False}); b = prm(mod, pid)
             back = maps.to_cc(f, v0); post('/set', {'cc': cc, 'value': back}); c = prm(mod, pid)
