@@ -11,6 +11,7 @@
 #include "test_deck.h"
 #include "test_shape.h"
 #include "test_view.h"
+#include "test_stutter.h"
 
 int main()
 {
@@ -24,6 +25,7 @@ int main()
     testDeck();
     testShape();
     testView();
+    testStutter();
     std::printf ("%s: %d failure(s)\n", failures ? "FAILED" : "passed", failures);
     return failures ? 1 : 0;
 }
