@@ -47,4 +47,45 @@ for song in (0, 1):                                                          # S
     assert {k for _, k, _ in P.values()} == {'pattern', 'mutate', 'undo', 'keep', 'transpose', 'fill', 'roll', 'octjump', 'dir', 'oct', 'int', 'auto', 'phrase'}
 assert [k for _, k in synths.ACID_RULE] == ['mutate', 'next', 'undo'] and synths.ACID_RULE[-1][0] == 1.0
 assert set(synths.ENTRY) == {'acid in/out', 'arp in/out'}
+import fx                                                                   # Synths actions offline: stub the rig, put it back after
+real = dict(setp=synths.setp, getp=synths.getp, arp_dir=synths.arp_dir, arp_data=synths.arp_data)
+real_fx = dict(acid_cutoff=fx.acid_cutoff, set_strip_map=fx.set_strip_map, bars_secs=fx.bars_secs, STEP=fx.STEP)
+sent, rig = [], {S.ACID: {24: 10.0}, synths.ARP: {16: 1.0, 18: 2.0, 19: 0.6}}
+class Rng:
+    def __init__(s, *v): s.v = list(v)
+    def random(s): return s.v.pop(0)
+def cutoff(v=None):
+    if v is None: return rig['cut']
+    rig['cut'] = v; sent.append(('cut', v))
+def fails(): raise RuntimeError('no rig')
+try:
+    synths.setp = lambda mid, vals: sent.append((mid, dict(vals)))
+    synths.getp = lambda mid: rig[mid]
+    synths.arp_dir = lambda: 0; synths.arp_data = lambda **kv: sent.append(('data', kv))
+    fx.acid_cutoff, fx.set_strip_map = cutoff, lambda m: sent.append(('strip', dict(m)))
+    fx.bars_secs, fx.STEP = (lambda n: n * 0.02), 0.002
+    A = S.ACID
+    for r, did, want in ((0.69, 'acid mutate', [(A, {30: 1.0}), (A, {29: 1.0}), (A, {29: 0.0})]),
+                         (0.89, 'acid next', [(A, {24: 8.0})]), (0.95, 'acid undo', [(A, {31: 1.0}), (A, {31: 0.0})])):
+        sent.clear(); assert synths.auto_step(0, {'acid'}, Rng(r)) == [did] and sent == want, (r, sent)
+    rig[A][24] = 3.0; sent.clear(); synths.auto_step(0, {'acid'}, Rng(0.89)); assert sent == [(A, {24: 10.0})], sent   # not in the song: its first
+    synths.getp = lambda mid: fails() if mid == A else rig[mid]; sent.clear()                                         # acid fails, arp still moves
+    did = synths.auto_step(0, {'acid', 'arp'}, Rng(0.89, 0.3)); assert did == ['acid error: no rig', 'arp direction'] and sent == [('data', {'dir': 1})], (did, sent)
+    synths.getp = lambda mid: rig[mid]
+    sent.clear(); synths.fill(None); synths.roll(None); assert sent == [(A, {34: 0.0}), (synths.ARP, {21: 0.0})], sent   # release = hold buttons only
+    rig[synths.ARP][16] = 4.0; sent.clear(); assert synths.hold('octjump', None, True) == 4.0 and sent == [], sent
+    n = [0]; alive2 = lambda: (n.__setitem__(0, n[0] + 1), n[0] <= 2)[1]                                            # alive for 2 steps
+    steps = []; assert synths.ramp(steps.append, 0.0, 1.0, 10.0, alive2) is False and len(steps) == 2, steps
+    rig['cut'] = 0.4; n[0] = 0; sent.clear(); synths.acid_out(alive2)                                               # cut-off out: strip untouched
+    assert not [x for x in sent if x[0] == 'strip'] and sent[-1] == ('cut', 0.4) and synths._open == {'cut': 0.4}, sent
+    synths._open.clear(); rig['cut'] = 0.05; sent.clear(); synths.acid_in(0.7, lambda: True)                       # cold start: open to the floor
+    cuts = [v for k, v in sent if k == 'cut']; assert ('strip', {1: 0.7}) in sent and cuts[0] == 0.05 and cuts[-1] == 0.5 and cuts == sorted(cuts), sent
+    assert synths._open == {}, synths._open
+    sent.clear(); synths.arp_in(0.5, lambda: True); g = [v[19] for k, v in sent if k == synths.ARP and 19 in v]        # arp in: short -> 0.6, roll x4 released
+    assert g[0] == 0.05 and g[-1] == 0.6 and (synths.ARP, {20: 4.0, 21: 1.0}) in sent and (synths.ARP, {21: 0.0}) in sent and synths._open == {}, sent
+finally:
+    for k, v in real.items(): setattr(synths, k, v)
+    for k, v in real_fx.items(): setattr(fx, k, v)
+    synths._open.clear()
+print('Synths offline: auto_step mutate/next/undo + first-of-song + acid error keeps arp, hold-button release, octjump at 4, ramp cut-off, acid_out keeps strip, acid_in floor 0.5, arp_in roll')
 print('ok')
