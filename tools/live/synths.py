@@ -121,42 +121,39 @@ def arp_gate(v=None):
     if v is None: return getp(ARP)[R_GATE]
     setp(ARP, {R_GATE: round(v, 3)})
 # ENTRY moves block ~2 bars (ramp sleeps); pads.py runs them in threads (Task 19).
-# _open keeps the knob's open value while a ramp owns it: an in/out cut off mid-ramp leaves it here, so the next in/out
-# reopens to the true value, not the half-closed one it reads. Popped only when a move completes.
+# _open keeps the knob's open value while a ramp owns it. ok = ramp's result: True done, False cancelled (a newer in/out press
+# took over: it owns the knob and the strip, so the cancelled one writes nothing more and leaves _open for it to reuse),
+# None = an exception (the knob goes back open). Restored -> popped.
 _open = {}
 def _hold(key, now): return _open.setdefault(key, now if now > 0.07 else 0.5)   # cold start already at CLOSED / SHORT: open to 0.5
 def acid_in(level, alive):                                           # strip up, cutoff opens from closed to where it was over 2 bars
-    c, done = _hold('cut', fx.acid_cutoff()), False
+    c, ok = _hold('cut', fx.acid_cutoff()), None
     try:
         fx.acid_cutoff(CLOSED); fx.set_strip_map({1: level})
-        done = ramp(fx.acid_cutoff, CLOSED, c, fx.bars_secs(2), alive)
+        ok = ramp(fx.acid_cutoff, CLOSED, c, fx.bars_secs(2), alive)
     finally:
-        fx.acid_cutoff(c)
-        if done: _open.pop('cut', None)
+        if ok is not False: fx.acid_cutoff(c); _open.pop('cut', None)
 def acid_out(alive):                                                 # cutoff closes over 2 bars, strip down, cutoff back for next time
-    cur = fx.acid_cutoff(); c, done = _hold('cut', cur), False
-    try: done = ramp(fx.acid_cutoff, cur, CLOSED, fx.bars_secs(2), alive)
+    cur = fx.acid_cutoff(); c, ok = _hold('cut', cur), None
+    try: ok = ramp(fx.acid_cutoff, cur, CLOSED, fx.bars_secs(2), alive)
     finally:
-        if done: fx.set_strip_map({1: 0.0})                          # cut off = a newer in owns the strip: leave it up
-        fx.acid_cutoff(c)
-        if done: _open.pop('cut', None)
+        if ok: fx.set_strip_map({1: 0.0})                            # strip down only when the out completed
+        if ok is not False: fx.acid_cutoff(c); _open.pop('cut', None)
 def arp_in(level, alive):                                            # strip up, notes grow from short to their length, roll x4 on the last beat
-    g, done = _hold('gate', arp_gate()), False
+    g, ok = _hold('gate', arp_gate()), None
     try:
         arp_gate(SHORT); fx.set_strip_map({6: level})
-        done = ramp(arp_gate, SHORT, g, fx.bars_secs(2) - fx.bars_secs(0.25), alive)
-        if done:
+        ok = ramp(arp_gate, SHORT, g, fx.bars_secs(2) - fx.bars_secs(0.25), alive)
+        if ok:
             roll(4)
             try: time.sleep(fx.bars_secs(0.25))
             finally: roll(None)
     finally:
-        arp_gate(g)
-        if done: _open.pop('gate', None)
+        if ok is not False: arp_gate(g); _open.pop('gate', None)
 def arp_out(alive):
-    cur = arp_gate(); g, done = _hold('gate', cur), False
-    try: done = ramp(arp_gate, cur, SHORT, fx.bars_secs(2), alive)
+    cur = arp_gate(); g, ok = _hold('gate', cur), None
+    try: ok = ramp(arp_gate, cur, SHORT, fx.bars_secs(2), alive)
     finally:
-        if done: fx.set_strip_map({6: 0.0})
-        arp_gate(g)
-        if done: _open.pop('gate', None)
+        if ok: fx.set_strip_map({6: 0.0})
+        if ok is not False: arp_gate(g); _open.pop('gate', None)
 ENTRY = {'acid in/out': (acid_in, acid_out), 'arp in/out': (arp_in, arp_out)}   # bank 2 moves: (in, out)

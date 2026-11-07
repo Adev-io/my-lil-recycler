@@ -76,16 +76,26 @@ try:
     rig[synths.ARP][16] = 4.0; sent.clear(); assert synths.hold('octjump', None, True) == 4.0 and sent == [], sent
     n = [0]; alive2 = lambda: (n.__setitem__(0, n[0] + 1), n[0] <= 2)[1]                                            # alive for 2 steps
     steps = []; assert synths.ramp(steps.append, 0.0, 1.0, 10.0, alive2) is False and len(steps) == 2, steps
-    rig['cut'] = 0.4; n[0] = 0; sent.clear(); synths.acid_out(alive2)                                               # cut-off out: strip untouched
-    assert not [x for x in sent if x[0] == 'strip'] and sent[-1] == ('cut', 0.4) and synths._open == {'cut': 0.4}, sent
+    rig['cut'] = 0.4; n[0] = 0; sent.clear(); synths.acid_out(alive2)                                               # cancelled out: its 2 ramp steps, then
+    assert len(sent) == 2 and all(k == 'cut' for k, _ in sent) and synths._open == {'cut': 0.4}, sent              # no strip, no cutoff write; _open kept
     synths._open.clear(); rig['cut'] = 0.05; sent.clear(); synths.acid_in(0.7, lambda: True)                       # cold start: open to the floor
     cuts = [v for k, v in sent if k == 'cut']; assert ('strip', {1: 0.7}) in sent and cuts[0] == 0.05 and cuts[-1] == 0.5 and cuts == sorted(cuts), sent
     assert synths._open == {}, synths._open
+    w = [0]                                                                 # exception mid-ramp (step 2 write fails): cutoff still back open
+    def flaky(v=None):
+        if v is not None:
+            w[0] += 1
+            if w[0] == 3: raise RuntimeError('step 2')                       # writes: 1 = CLOSED, 2 = ramp step 1, 3 = ramp step 2
+        return cutoff(v)
+    rig['cut'] = 0.4; sent.clear(); fx.acid_cutoff = flaky
+    try: synths.acid_in(0.7, lambda: True); raise AssertionError('acid_in swallowed the error')
+    except RuntimeError: pass
+    fx.acid_cutoff = cutoff; assert sent[-1] == ('cut', 0.4) and synths._open == {}, sent
     sent.clear(); synths.arp_in(0.5, lambda: True); g = [v[19] for k, v in sent if k == synths.ARP and 19 in v]        # arp in: short -> 0.6, roll x4 released
     assert g[0] == 0.05 and g[-1] == 0.6 and (synths.ARP, {20: 4.0, 21: 1.0}) in sent and (synths.ARP, {21: 0.0}) in sent and synths._open == {}, sent
 finally:
     for k, v in real.items(): setattr(synths, k, v)
     for k, v in real_fx.items(): setattr(fx, k, v)
     synths._open.clear()
-print('Synths offline: auto_step mutate/next/undo + first-of-song + acid error keeps arp, hold-button release, octjump at 4, ramp cut-off, acid_out keeps strip, acid_in floor 0.5, arp_in roll')
+print('Synths offline: auto_step mutate/next/undo + first-of-song + acid error keeps arp, hold-button release, octjump at 4, ramp cut-off, cancelled acid_out writes nothing after, acid_in floor 0.5, exception restores open, arp_in roll')
 print('ok')
