@@ -21,7 +21,7 @@ import sections, fx, synths
 STOP = os.path.join(here, 'pads.stop')
 state = {'on': [{} for _ in sections.PAGES], 'page': 0, 'busy': False, 'fx': set(), 'gen': 0, 'dgen': 0, 'snap': None, 'hw': False, 'swept': [], 'tgen': 0, 'hush': {}, 'bank': 0, 'saved': {}, 'agen': 0, 'machine': True, 'fgen': 0, 'fading': False, 'acts': 0,
          'song': 0, 'held': set(), 'auto': set(), 'phrase': 8, 'egen': {}, 'edir': {}, 'slit': set(), 'down': set(), 'vox': {},   # egen / edir: per entry move (acid, arp); vox: fx.vox_on
-         'rowpage': {}, 'path': [{} for _ in sections.PAGES]}   # rowpage: (page, row) -> row page on show (sections.pages index); path: per page row -> sample playing
+         'rowpage': {}, 'path': [{} for _ in sections.PAGES], 'tthread': None}   # tthread: the transition move running; rowpage: (page, row) -> row page on show (sections.pages index); path: per page row -> sample playing
 HUSH = {'drums only': (1, 2, 3, 5, 6, 7), 'no drums': (0, 4)}    # Mixer strips each move silences: drums only = Acid, decks A/B,
                                                                  # Acid Voice, Triple, deck D; no drums = My lil Drums + the drum stem
 lp = lambda names, pre: next((x for x in names if x.startswith(pre)), None)        # Launchpad unplugged -> page only
@@ -166,6 +166,8 @@ def sweep(to, gen, decks):                                      # the song's dec
         for d in decks: fx.set_deck_filters(d, [b + (to - b) * k / n for b in fx.BASEF[d]])
         time.sleep(fx.STEP)
 def fx_act(name):
+    if name in ('drums only', 'dnb', 'breakdown') and name not in state['fx'] and 'transition' in state['fx']:   # their release restores what they
+        LOG.write(time.ctime() + f" {name} ignored: transition running\n"); return                             # saved mid-move (strips, filters)
     if name in ('sweep up', 'sweep down'):
         state['gen'] += 1
         if name in state['fx']:                                   # release = snap back (the drop)
@@ -193,14 +195,18 @@ def fx_act(name):
     elif name == 'transition' and state['fx'] & {'drums only', 'dnb'}:   # their release puts back the strips they saved (HUSH / dnb snapshot),
         LOG.write(time.ctime() + f" transition ignored: {sorted(state['fx'] & {'drums only', 'dnb'})} held\n")   # which would undo strip 8
     elif name == 'transition':                                    # hand over to the song on show with the pair's move (fx.MOVES: blend or break
-        if name in state['fx']: return                            # & drop, from the clock's next beat); runs once, blinks while it runs
-        state['tgen'] += 1; g = state['tgen']; state['fx'].add(name); to = SP()   # the song pressed for, whatever page is on show when it ends
+        if name in state['fx']: return                            # & drop, from the bar line after the press); runs once, blinks while it runs
+        state['tgen'] += 1; g = state['tgen']; state['fx'].add(name); to = SP(); tp = time.time()   # the song pressed for, whatever page is on show
         def run():
-            try: done = fx.transition(to, state['on'], lambda: state['tgen'] == g, song=PLAY)   # from the song playing
-            except Exception: LOG.write(traceback.format_exc()); done = False
-            if done: playing(to)                                  # handed over: the arp, acid set and MiniLab follow (a cut-off one changes nothing)
-            state['fx'].discard(name); LOG.write(time.ctime() + f" transition to {sections.PAGES[to]['name']} {'done' if done else 'cut off'}\n"); paint()
-        threading.Thread(target=run, daemon=True).start()
+            done = False
+            try: done = fx.transition(to, state['on'], lambda: state['tgen'] == g, song=PLAY, tp=tp)   # from the song playing
+            except Exception: LOG.write(traceback.format_exc())
+            try:
+                if done: playing(to)                              # handed over: the arp, acid set and MiniLab follow (a cut-off one changes nothing)
+            except Exception: LOG.write(traceback.format_exc())
+            finally:                                              # the pad never stays stuck 'running'
+                state['fx'].discard(name); LOG.write(time.ctime() + f" transition to {sections.PAGES[to]['name']} {'done' if done else 'cut off'}\n"); paint()
+        th = state['tthread'] = threading.Thread(target=run, daemon=True); th.start()   # clean waits for it (cut off, STUT let go) before writing
     elif name in fx.STRIP_TOGGLE:                                  # in / out; lit = in. Out remembers the level, in puts it back
         k, dflt = fx.STRIP_TOGGLE[name]; cur = fx.strips()[k]
         if name in synths.ENTRY:                                   # acid / arp come in and go out melodically over 2 bars (synths.ENTRY)
@@ -275,9 +281,12 @@ def fx_act(name):
         for n in ('acid sweep', 'no bass', 'no vocals', 'breakdown'):
             if n in state['fx']: release(n)
         state['gen'] += 1; state['tgen'] += 1
+        th = state.get('tthread')                                 # a running move sees the cut-off within a STEP: let it stop (and let go of
+        if th and th is not threading.current_thread(): th.join(1.0)   # its STUT) before clean writes, so none of its writes land after clean's
         if 'dnb' in state['fx']: state['dgen'] += 1; fx.restore(state['snap']); state['snap'] = None   # snap back to the tempo from before, strips + drum pattern as before
         for n in list(state['hush']): fx.set_strip_map(state['hush'].pop(n))
-        fx.clean(PLAY()); state['fx'] = set()                     # after the hush / dnb restores: a cut-off transition's strip 8 settles too
+        try: fx.clean(PLAY())                                     # after the hush / dnb restores: a cut-off transition's strip 8 settles too
+        finally: state['fx'] = set()                              # (a failed STUT / arp write in clean still clears the moves row)
     LOG.write(time.ctime() + f" fx {name} -> {sorted(state['fx'])}\n")
 def release(name):                                              # put a bank-2 move back the way it found things
     s = state['saved'].pop(name, None); state['fx'].discard(name)

@@ -126,7 +126,7 @@ try:
     press(16); time.sleep(9.5)
     check('dnb: 140 BPM + break', b1 == 140.0 and p1 == fx.BREAK, f'{b1} BPM pattern {p1}')
     check('dnb release: tempo from before, beat + strips back', fx.bpm() == b0 and S.current_drum_pattern() == p0 and st() == s0, f'{b0} -> {fx.bpm()} BPM pattern {S.current_drum_pattern()}')
-    # song moves (fx.MOVES): Lowdown -> TOOM = blend (16 bars), TOOM -> Disco = break & drop (4 bars + drop); bar 1 = the clock's next beat
+    # song moves (fx.MOVES): Lowdown -> TOOM = blend (16 bars), TOOM -> Disco = break & drop (4 bars + drop); bar 1 = the bar line after the press
     bar, beat = fx.bars_secs(1), fx.bars_secs(0.25)
     def until(t): time.sleep(max(0.0, t - time.time()))
     def wait_for(f, secs):
@@ -134,17 +134,17 @@ try:
         while time.time() < t:
             if f(): return time.time()
         return None
-    press(71); page(1); tp = time.time(); press(17); tp += beat / 2              # the move starts within a beat of the press
+    press(71); page(1); tp = time.time(); press(17); tp += bar                  # bar 1 = the press's beat + 4 beats (+- half a beat)
     until(tp + 4 * bar); a4, b4, f4, s4 = lv(S.A), lv(S.B), [round(x, 2) for x in fx.deck_filters(S.A)], st()
-    check('blend bar 5: Lowdown untouched, TOOM bass rising under it, keys + vocals not yet', a4[1] == 1.2 and f4 == fx.BASEF[S.A] and s4[2] == U
-          and 0.15 < b4[0] < 0.85 and b4[1] == 0.0 and b4[3] == 0.0 and synths.scale_now() == 2774, f'A {a4} {f4} B {b4} strips {s4}')
+    check('blend bar 5: Lowdown untouched, TOOM bass + drums rising on strip 4 under it, keys + vocals not yet', a4[1] == 1.2 and f4 == fx.BASEF[S.A] and s4[2] == U
+          and b4[0] == 1.0 and 0.15 * U < s4[3] < 0.85 * U and b4[1] == 0.0 and b4[3] == 0.0 and synths.scale_now() == 2774, f'A {a4} {f4} B {b4} strips {s4}')
     until(tp + 12 * bar); b12, f12, s12 = lv(S.B), fx.deck_filters(S.A), st()
     check('blend bar 13: Lowdown high-passing + fading, TOOM keys + vocals rising', f12[0] > 0.15 and 0.05 < s12[2] < U - 0.05 and b12[0] == 1.0
           and 0.15 < b12[1] < 0.85 and 0.15 < b12[3] < 0.85, f'A filters {[round(x, 2) for x in f12]} B {b12} strips {s12}')
     until(tp + 16 * bar + 2)
     check('blend done: Lowdown out, TOOM pad 1 rows in', lv(S.A) == [0.0] * 4 and lv(S.B) == [1.0, 1.0, 0.0, 1.0] and path(C, 0).startswith('1-drums-05') and st()[2] == U
           and st()[3] == U and get()['launchpad']['song'] == 1 and synths.scale_now() == 2774, f'A {lv(S.A)} B {lv(S.B)} strips {st()}')
-    page(2); post('/press', {'note': 17}); t0 = wait_for(lambda: prm(S.B, fx.STUT) == 1.0, 3)   # break: starts with the STUT hold on TOOM
+    page(2); post('/press', {'note': 17}); t0 = wait_for(lambda: prm(S.B, fx.STUT) == 1.0, 4)   # break: starts with the STUT hold on TOOM
     check('break bar 1: TOOM slots held at STUT 1/4, arp on the shared notes (2130), Disco silent', t0 and all(prm(S.B, fx.STUT + k) == 1.0 for k in range(4))
           and prm(S.B, fx.STUTLEN) == 0.0 and synths.scale_now() == 2130 and st()[7] == 0.0, f'scale {synths.scale_now()} strips {st()}')
     t0 = t0 or time.time()

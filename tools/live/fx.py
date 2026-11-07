@@ -20,8 +20,17 @@ def strip(k, on):                      # Mixer strip k (2 = deck A music, 3 = de
     S.call('vcvrack_set_params', {'moduleId': S.MIX, 'params': [{'id': k, 'value': S.U if on else 0.0}]})
 def clean(song=None):                  # song: the song playing (pads.py PLAY). A strip that rests at 0 (deck D) opens if its song plays, else
     set_filters(BASE); set_deck_filters(S.D, BASEF[S.D]); reverse(False); strip(2, True); strip(3, True); strip(4, True)   # back to rest: a transition
-    if song is None: return                                         # cut off mid-fade leaves no strip part-open. None: deck D's strip left as is
-    S.call('vcvrack_set_params', {'moduleId': S.MIX, 'params': [{'id': STRIP[d], 'value': S.U if own_deck(song) == d else r} for d, r in REST.items()]})
+    if song is not None:                                            # cut off mid-fade leaves no strip part-open. None: deck D's strip left as is
+        S.call('vcvrack_set_params', {'moduleId': S.MIX, 'params': [{'id': STRIP[d], 'value': S.U if own_deck(song) == d else r} for d, r in REST.items()]})
+    err = None                                                      # no Recycler STUT left held (a break & drop cut off), each deck on its own
+    for d in (S.A, S.B, S.D, C):
+        try: S.call('vcvrack_set_params', {'moduleId': d, 'params': [{'id': STUT + k, 'value': 0.0} for k in range(4)]})
+        except Exception as e: err = err or e
+    if song is not None:                                            # and the arp on the playing song's keys (one read; a write only if off)
+        import synths
+        try: synths.follow(lambda: song)
+        except Exception as e: err = err or e
+    if err: raise err
 
 # Per song (2026-11-06, Ari: "sweep is only for samples ... a sweep up and down for each [song]" + "a transition from one song
 # to another"). A song = its own deck (page 1 Lowdown = A, page 2 Time Out Of Mind = B, page 3 Disco Ulysses = D, sections.PAGES
@@ -48,11 +57,15 @@ def set_deck_filters(d, v): S.call('vcvrack_set_params', {'moduleId': d, 'params
 # pad runs the move for (song playing -> song on show). The table is data: retune a pair here. Unlisted pairs: same key = blend, else break & drop.
 MOVES = {(0, 1): ('blend', 16), (1, 0): ('blend', 16),                                   # Lowdown <-> TOOM, both D major
          (0, 2): ('break_drop', 4), (2, 0): ('break_drop', 4), (1, 2): ('break_drop', 4), (2, 1): ('break_drop', 4)}   # in / out of Disco (B major)
-BLEND_ROWS = ((41, 21), (71, 81))      # blend, silent song on show: first half its bass + drums rows rise (pad 1), second half keys + vocals
+BLEND_ROWS = ((41, 21), (71, 81))      # blend, silent song on show: first half its bass + drums rows come up (pad 1), second half keys + vocals
 BREAK_STUT = (0, 0, 1, 2)              # break: STUT LEN per quarter of the break = 1/4, 1/4, 1/8, 1/16 bar (4 bars: one per bar)
 CLOSE = LP                             # break: the outgoing filters close. The rig has no echo (2026-11-06: no delay module, Mixer sends 1-2
                                        # and returns unpatched), so a low-pass close stands in for the echo tail
 POLL = 0.005                           # clock edge poll (each MCP read takes ~16 ms on its own)
+LEVEL_STEP = 0.05                      # blend: Recycler slot LEVEL is unsmoothed, so its ramps write at 20 Hz (Mixer strips slew 5 ms: STEP is fine)
+SWAP_GAP = 0.15                        # load_now: the Recycler's worker drops the emptied slot before the new path is written
+def quick(n, a):                       # an MCP read that gives up after 1 s (the clock poll must not hang a move); board_check stubs it
+    return S.rpc('tools/call', {'name': n, 'arguments': a}, timeout=1.0)['result']['content'][0]['text']
 def move_for(frm, to):
     if (frm, to) in MOVES: return MOVES[(frm, to)]
     return ('blend', 16) if S.SCALES.get(frm) == S.SCALES.get(to) else ('break_drop', 4)
@@ -61,11 +74,11 @@ def put(w):                            # {module: {param: value}}: one set_param
     for m, ps in w.items():
         if ps: S.call('vcvrack_set_params', {'moduleId': m, 'params': [{'id': k, 'value': v} for k, v in ps.items()]})
 def clock_gate():                      # Clocked master clock out (one pulse a beat: every deck and My lil Drums run on it), volts
-    o = json.loads(S.call('vcvrack_get_voltages', {'moduleId': CLOCK}))[0]['outputs']
+    o = json.loads(quick('vcvrack_get_voltages', {'moduleId': CLOCK}))[0]['outputs']
     return next(x['voltages'][0] for x in o if x['id'] == 0)
-def next_beat(alive, beat):            # bar 1 of a move = the set clock's next beat edge. Rack shows no bar counter (Clocked, the Recyclers and
-    t_end, low = time.time() + 1.5 * beat, None   # My lil Drums carry no position), so the bars count from the beat after the press: press on
-    while time.time() < t_end:                    # the downbeat. None = cut off while waiting; a stopped or unreadable clock = start now
+def next_beat(alive, beat):            # the set clock's next rising edge; None = cut off while waiting; a stopped or unreadable clock = now
+    t_end, low = time.time() + 1.5 * beat, None
+    while time.time() < t_end:
         if not alive(): return None
         t = time.time()
         try: v = clock_gate()
@@ -74,7 +87,16 @@ def next_beat(alive, beat):            # bar 1 of a move = the set clock's next 
         elif low is not None: return (low + time.time()) / 2   # between the last low read and this high one
         time.sleep(POLL)
     return time.time()
-def run(t0, total, events, frame, alive):   # events [(secs, fn)] fire once on time, frame(secs) writes the ramps every STEP; False = cut off
+def next_bar(alive, beat, tp):         # bar 1 of a move = the bar line after the press: the clock beat nearest the press + 4 beats (Rack shows
+    e = next_beat(alive, beat)         # no bar counter, so the press marks the downbeat: press on the 1). Waits for it; None = cut off
+    if e is None: return None
+    t0 = e - beat * round((e - tp) / beat) + 4 * beat
+    while t0 < time.time() + 0.05: t0 += 4 * beat                  # setup ran long: the next bar line after that
+    while time.time() < t0:
+        if not alive(): return None
+        time.sleep(min(STEP, t0 - time.time()))
+    return t0
+def run(t0, total, events, frame, alive, step=STEP):   # events [(secs, fn)] fire once on time, frame(secs) writes the ramps every step; False = cut off
     ev = sorted(events, key=lambda e: e[0])
     while True:
         if not alive(): return False
@@ -84,7 +106,7 @@ def run(t0, total, events, frame, alive):   # events [(secs, fn)] fire once on t
             if not alive(): return False
         if t >= total: return True
         frame(t)
-        time.sleep(max(0.0, min(STEP, t0 + min(ev[0][0] if ev else total, total) - time.time())))
+        time.sleep(max(0.0, min(step, t0 + min(ev[0][0] if ev else total, total) - time.time())))
 def setup(page, on, want):             # reads only: what comes in, what goes out, where every deck is now
     rows, own, mix = S.PAGES[page]['rows'], own_deck(page), strips()
     ps = {}; S.now(rows, None, ps)                                 # nothing of it playing on any row page (asked of the rig): bring in pad 1 rows
@@ -93,83 +115,123 @@ def setup(page, on, want):             # reads only: what comes in, what goes ou
     others = [k for k, p in enumerate(S.PAGES) if p['rows'] and k != page]   # out: decks heard now; one at strip 0 (a Disco cue) keeps its slots + lit pads
     out = list(dict.fromkeys(d for k in others for d in song_decks(k, on) if d not in inn and mix[STRIP[d]] > 0.001))
     P = {d: {p['id']: p['value'] for p in json.loads(S.call('vcvrack_get_params', {'moduleId': d}))} for d in inn + out}
+    sounding = lambda b: mix[STRIP[deck_of(rows[b])]] > 0.001 and P[deck_of(rows[b])][14 + rows[b]['slot']] > 0.01   # its slot heard now
     return dict(page=page, rows=rows, own=own, mix=mix, bring=bring, inn=inn, out=out, others=others, P=P, beat=60.0 / bpm(),
-                f0={d: [P[d][24 + k] for k in range(len(BASEF[d]))] for d in inn + out})
-def bring_in(s, on):                   # pad 1 of each row, at the level its slot plays now (silent: 0; the shared drums slot keeps sounding)
-    for b in s['bring']:
-        r = s['rows'][b]; d = r.get('deck', S.A); S.play(r['slot'], r['samples'][0], s['P'][d][14 + r['slot']], d); on[s['page']][b] = 0
-def lvl(s, b, e, w):                   # a brought-in row from where it was to its row level
-    r = s['rows'][b]; d = r.get('deck', S.A); a = s['P'][d][14 + r['slot']]; w.setdefault(d, {})[14 + r['slot']] = a + (r['level'] - a) * e
-def finish(s, on):                     # the end of every move (as the old 8-bar transition ended): old songs dark, their decks silent + reset
-    for k in s['others']:
+                hot=[b for b in bring if sounding(b)], f0={d: [P[d][24 + k] for k in range(len(BASEF[d]))] for d in inn + out})
+deck_of = lambda r: r.get('deck', S.A)
+def load_now(d, paths):                # {slot: path} playing from now: the Recycler lands a new path at its 8-bar loop wrap, or at once in an
+    st = json.loads(S.call('vcvrack_get_module_state', {'id': d})); st.pop('params', None)   # empty slot (Recycler.cpp process: pending lands
+    sl = st['data']['slots']                                       # when wrapped || !running || !cur), so empty the slots first, then load.
+    if all(k in paths or not x['path'] for k, x in enumerate(sl)):   # never all four empty at once (the scan would deal the deck a new combo):
+        for k, p in paths.items(): sl[k]['path'] = p               # then they wait for the wrap
+        S.call('vcvrack_set_module_state', {'id': d, 'state': st}); return False
+    for k in paths: sl[k]['path'] = ''
+    S.call('vcvrack_set_module_state', {'id': d, 'state': st}); time.sleep(SWAP_GAP)
+    for k, p in paths.items(): sl[k]['path'] = p
+    S.call('vcvrack_set_module_state', {'id': d, 'state': st}); return True
+def bring_in(s, on, rows, level=None):   # pad 1 of these brought rows, per deck (level None = as its slot plays now)
+    by = {}
+    for b in rows: by.setdefault(deck_of(s['rows'][b]), []).append(b)
+    for d, bs in by.items():
+        load_now(d, {s['rows'][b]['slot']: s['rows'][b]['samples'][0] for b in bs})
+        if level is not None: put({d: {14 + s['rows'][b]['slot']: level(b) for b in bs}})
+        for b in bs: on[s['page']][b] = 0
+def lvl(s, b, e, w, a=None):           # a brought-in row from a (default: where it was) to its row level
+    r = s['rows'][b]; d = deck_of(r); a = s['P'][d][14 + r['slot']] if a is None else a
+    w.setdefault(d, {})[14 + r['slot']] = a + (r['level'] - a) * e
+def finish(s, on):                     # the end of every move: the incoming song up first, the old songs' decks silent + reset, THEN their
+    for k in s['others']:              # strips back to rest (a strip reopened before its slots are zeroed = a blip of the old song)
         for b, r in S.PAGES[k]['rows'].items():
-            if r.get('deck', S.A) in s['out']: on[k][b] = None
-    w = {S.MIX: {}}
-    for d in s['out']:
-        w.setdefault(d, {}).update({14 + k: 0.0 for k in range(len(BASEF[d]))}); w[d].update({24 + k: x for k, x in enumerate(BASEF[d])})
-        w[S.MIX][STRIP[d]] = REST.get(d, S.U)
-    for d in s['inn']: w.setdefault(d, {}).update({24 + k: x for k, x in enumerate(BASEF[d])}); w[S.MIX][STRIP[d]] = S.U
+            if deck_of(r) in s['out']: on[k][b] = None
+    w = {}
+    for d in s['inn']: w.setdefault(d, {}).update({24 + k: x for k, x in enumerate(BASEF[d])})
     for b in s['bring']: lvl(s, b, 1.0, w)
+    for d in s['out']: w.setdefault(d, {}).update({14 + k: 0.0 for k in range(len(BASEF[d]))}); w[d].update({24 + k: x for k, x in enumerate(BASEF[d])})
     put(w)
-def transition(page, on, alive, song=None):   # song: the song playing (pads.py PLAY, a value or a callable); None = as if the song on show
+    put({S.MIX: {**{STRIP[d]: S.U for d in s['inn']}, **{STRIP[d]: REST.get(d, S.U) for d in s['out']}}})   # one Mixer write, after the decks
+def transition(page, on, alive, song=None, tp=None):   # song: the song playing (pads.py PLAY, a value or a callable); None = as if the song
+    tp = time.time() if tp is None else tp             # on show. tp: the press (bar 1 = the bar line after it)
     frm = song() if callable(song) else song
     name, bars = move_for(page if frm is None else frm, page)
-    return (blend if name == 'blend' else break_drop)(page, on, alive, bars, frm)
-def blend(page, on, alive, bars, frm=None):   # first half: the incoming bass + drums rise under the outgoing song; second half: the outgoing
-    s = setup(page, on, sum(BLEND_ROWS, ()))  # song high-passes away and fades while the incoming keys + vocals come in. False = cut off
-    t0 = next_beat(alive, s['beat'])
+    return (blend if name == 'blend' else break_drop)(page, on, alive, bars, frm, tp)
+def blend(page, on, alive, bars, frm=None, tp=None):   # first half: the incoming bass + drums come up under the outgoing song; second half:
+    tp = time.time() if tp is None else tp             # the outgoing song high-passes away and fades while the incoming keys + vocals come in
+    s = setup(page, on, sum(BLEND_ROWS, ()))
+    t0 = next_bar(alive, s['beat'], tp)
     if t0 is None: return False
-    H, inn, out, f0, mix = bars / 2 * 4 * s['beat'], s['inn'], s['out'], s['f0'], s['mix']
-    lo, hi = [b for b in BLEND_ROWS[0] if b in s['bring']], [b for b in BLEND_ROWS[1] if b in s['bring']]
-    def bar1():
-        bring_in(s, on)
-        if s['bring']: put({S.MIX: {STRIP[s['own']]: S.U}}); mix[STRIP[s['own']]] = S.U   # its rows rise from 0, so the strip opens at once
+    H, inn, out, f0, mix, rows = bars / 2 * 4 * s['beat'], s['inn'], s['out'], s['f0'], s['mix'], s['rows']
+    cold = [b for b in s['bring'] if b not in s['hot']]            # brought rows on silent slots: loaded at once (they play from bar 1)
+    lo, hi = [b for b in BLEND_ROWS[0] if b in cold], [b for b in BLEND_ROWS[1] if b in cold]
+    rise = [d for d in inn if any(deck_of(rows[b]) == d for b in lo) and not any(deck_of(rows[b]) == d for b in s['hot'])]
+    def bar1():                        # first half rises on the decks' STRIPS (Mixer slews them: no zipper), its slots at row level
+        if rise: put({S.MIX: {STRIP[d]: 0.0 for d in rise}})
+        for d in rise: mix[STRIP[d]] = 0.0
+        bring_in(s, on, cold, lambda b: rows[b]['level'] if b in lo else 0.0)
+        for b in s['hot']:                                         # the shared drums slot sounding (the outgoing drums): the new path
+            r = rows[b]; S.play(r['slot'], r['samples'][0], s['P'][deck_of(r)][14 + r['slot']], deck_of(r)); on[page][b] = 0   # lands at the wrap
+    last = [-1.0]
     def frame(t):
         w, e1, e2 = {S.MIX: {}}, smooth(t / H), smooth((t - H) / H)
-        if t <= H + STEP:                                          # first half (one more frame lands each ramp on its end)
-            for b in lo: lvl(s, b, e1, w)
-            for d in inn:
-                w.setdefault(d, {}).update({24 + k: a + (z - a) * e1 for k, (a, z) in enumerate(zip(f0[d], BASEF[d]))})
-                w[S.MIX][STRIP[d]] = mix[STRIP[d]] + (S.U - mix[STRIP[d]]) * e1
-        if t >= H:                                                 # second half
-            for b in hi: lvl(s, b, e2, w)
-            for d in out:
-                w.setdefault(d, {}).update({24 + k: a + (HP - a) * e2 for k, a in enumerate(f0[d])}); w[S.MIX][STRIP[d]] = mix[STRIP[d]] * (1 - e2)
+        if t >= H:                                                 # second half: keys + vocals slot levels, every LEVEL_STEP
+            for b in hi: lvl(s, b, e2, w, 0.0)
+        if t - last[0] >= STEP - 1e-9:                             # filters + strips every STEP
+            last[0] = t
+            if t <= H + STEP:
+                for d in inn:
+                    w.setdefault(d, {}).update({24 + k: a + (z - a) * e1 for k, (a, z) in enumerate(zip(f0[d], BASEF[d]))})
+                    w[S.MIX][STRIP[d]] = mix[STRIP[d]] + (S.U - mix[STRIP[d]]) * e1
+            if t >= H:
+                for d in out:
+                    w.setdefault(d, {}).update({24 + k: a + (HP - a) * e2 for k, a in enumerate(f0[d])}); w[S.MIX][STRIP[d]] = mix[STRIP[d]] * (1 - e2)
         put(w)
-    if not run(t0, 2 * H, [(0.0, bar1)], frame, alive) or not alive(): return False
+    if not run(t0, 2 * H, [(0.0, bar1)], frame, alive, LEVEL_STEP) or not alive(): return False
     finish(s, on); return True
-def break_drop(page, on, alive, bars, frm=None):   # the outgoing slots stutter (STUT 1/4, 1/4, 1/8, 1/16 bar) as their filters close; beat 4 of
-    import synths                                  # the last bar = air; the next downbeat = the incoming song full on. The arp plays the notes
-    s = setup(page, on, FIRST)                     # both keys share during the break, the new song's scale on the drop. False = cut off
-    inn, out, f0, beat = s['inn'], s['out'], s['f0'], s['beat']
+def break_drop(page, on, alive, bars, frm=None, tp=None):   # the outgoing slots stutter (STUT 1/4, 1/4, 1/8, 1/16 bar) as their filters
+    import synths                                  # close; beat 4 of the last bar = air; the next downbeat = the incoming song full on.
+    tp = time.time() if tp is None else tp         # The arp plays the notes both keys share during the break, the new song's scale
+    s = setup(page, on, FIRST)                     # on the drop. False = cut off
+    inn, out, f0, beat, rows = s['inn'], s['out'], s['f0'], s['beat'], s['rows']
     brk = out + ([C] if C in inn and s['mix'][STRIP[C]] > 0.001 and s['P'][C][14] > 0.01 else [])   # the shared drums slot breaks too
-    a, b = S.SCALES.get(frm), S.SCALES.get(page)
-    shared = synths.mask_of(set(a) & set(b)) if a and b else None
+    late = [b for b in s['bring'] if deck_of(rows[b]) in brk]      # brought rows on a breaking deck: loaded in the air
+    a, b_ = S.SCALES.get(frm), S.SCALES.get(page)
+    shared = synths.mask_of(set(a) & set(b_)) if a and b_ else None
     held, scaled, done = set(), [], False
     def stut(div):
         held.update(brk)                                           # recorded before the write: a failed write is still let go
         put({d: {STUTLEN: float(div), **{STUT + k: 1.0 for k in range(len(BASEF[d]))}} for d in brk})
-    def release():
-        put({d: {STUT + k: 0.0 for k in range(len(BASEF[d]))} for d in held}); held.clear()
+    def release():                                                 # each deck on its own: one failed write never keeps another held
+        err = None
+        for d in list(held):
+            try: put({d: {STUT + k: 0.0 for k in range(len(BASEF[d]))}}); held.discard(d)
+            except Exception as e: err = err or e
+        if err: raise err
     def bar1():
         stut(BREAK_STUT[0])                                        # on the bar line first, the silent setup after it
         if shared is not None: scaled.append(shared); synths.set_mask(shared)
-        bring_in(s, on)
+        bring_in(s, on, [b for b in s['bring'] if b not in late], lambda b: 0.0)   # loaded now, silent: running in time by the drop
     def air():
-        release(); put({S.MIX: {STRIP[d]: 0.0 for d in brk + inn}})
+        put({S.MIX: {STRIP[d]: 0.0 for d in brk + inn}}); release()   # strips to 0 first, then STUT let go
+        bring_in(s, on, late)                                      # the drums slot swapped in the silence: it plays from the drop
     B = 4 * beat; t_air, total = (bars - 1) * B + 3 * beat, bars * B
     events = [(0.0, bar1)] + [(k * B, lambda k=k: stut(BREAK_STUT[k * len(BREAK_STUT) // bars])) for k in range(1, bars)] + [(t_air, air)]
     def frame(t):
         if t <= t_air + STEP: e = smooth(t / t_air); put({d: {24 + k: x + (CLOSE - x) * e for k, x in enumerate(f0[d])} for d in brk})
     try:
-        t0 = next_beat(alive, beat)
+        t0 = next_bar(alive, beat, tp)
         if t0 is None or not run(t0, total, events, frame, alive) or not alive(): return False
-        finish(s, on); synths.set_scale(page); done = True; return True
+        finish(s, on); done = True
+        try: synths.set_scale(page)                                # pads' playing() follows the song too: a failed write here is not a failed move
+        except Exception: pass
+        return True
     finally:
-        if held: release()                                         # STUT never left held: done, cut off or an error
-        if scaled and not done and frm is not None:                # cut off: the playing song's keys back, unless the arp moved on since
-            with synths.ARP_LOCK:
-                if synths.scale_now() == scaled[0]: synths.set_scale(frm)
+        try:
+            if held:                                               # STUT never left held: done, cut off or an error (one retry)
+                try: release()
+                except Exception: release()
+        finally:
+            if scaled and not done and frm is not None:            # cut off: the playing song's keys back, unless the arp moved on since
+                with synths.ARP_LOCK:
+                    if synths.scale_now() == scaled[0]: synths.set_scale(frm)
 
 # Pad 16 'dnb' = drum + bass section: My lil Drums + Acid Bass only, tempo on an ADSR. Press: attack from the set's tempo -> peak, decay -> sustain,
 # held there. Press again: release back to the tempo from before and every strip back where it was. Peak above sustain = overshoot then settle.
