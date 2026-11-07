@@ -1181,7 +1181,12 @@ struct Recycler : Module
                 landedId[i].store (st.cur ? st.cur->id : 0, std::memory_order_relaxed);
             }
             else if ((jumped || shapeJump) && st.cur && st.cur->a.frames())
-                startJump (st, fadeJump);   // RESET, START or REV
+            {
+                if (jumped) st.stut.recapture();   // RESET / a clock jump: a held STUT re-aligns to the new grid point
+                startJump (st, fadeJump);          // RESET, START or REV
+            }
+            // stopped (once the stop ramp is silent, so the leap is not heard): a STUT held through the restart lands on the beat
+            if (! running && runGain == 0.f) st.stut.recapture();
             st.start = startNow;
             st.rev = revNow;
 
