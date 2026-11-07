@@ -1,5 +1,5 @@
 # Presses every button on the virtual console (http://127.0.0.1:2700) through the page server, as a click would: both arrows,
-# every sample pad on every page, the bank button, every move in every bank, the drum machine button, every Synths page pad,
+# every sample pad on every page (row page 2 too, through its row-end round button), the bank button, every move in every bank, the drum machine button, every Synths page pad,
 # the three MiniLab mode buttons, every labelled MiniLab knob / fader in every mode and every MiniLab pad. One PASS / FAIL line per button.
 # Saves the rig first (decks A/B/C, Arp, Acid, Mixer, Drums, tempo, page, bank, MiniLab mode) and puts it back at the end.
 # Audible while it runs (several minutes). Run with Rack + pads.py up, no move held: py -3.11 board_sweep.py
@@ -63,19 +63,33 @@ try:
     # ---- a) every sample pad on every page: plays its sample in its deck slot, lit; again = muted
     for d in (S.A, S.B, C): S.call('vcvrack_set_params', {'moduleId': d, 'params': [{'id': 14 + k, 'value': 0.0} for k in range(4)]})
     time.sleep(6)                                                                # pads.py re-reads the rig: every row dark
+    def row_pads(P, pg, row):                                                    # every pad of a row as shown (row page 1 or 2)
+        r = S.PAGES[pg]['rows'][row['base']]; deck, slot = r.get('deck', S.A), r['slot']; L = S.cur(r, row.get('page2'))
+        tag = f' page {row["page2"] + 1}' if row.get('page2') is not None else ''
+        for i, label in enumerate(row['labels']):
+            if not label: continue
+            note, want = row['base'] + i, os.path.basename(L[i])
+            if lit(row['base']) == i: press(note)                            # already lit: a press would mute, so mute first
+            ok1 = press(note); on1, p1, l1 = lit(row['base']), path(deck, slot), prm(deck, 14 + slot)
+            ok2 = press(note); on2, l2 = lit(row['base']), prm(deck, 14 + slot)
+            check(f'{P} {row["name"]}{tag} pad {i + 1} ({label})', ok1 and ok2 and on1 == i and p1 == want and near(l1, r['level']) and on2 is None and l2 == 0.0,
+                  '' if on1 == i and p1 == want else f'lit {on1} {p1} level {round(l1, 2)} -> lit {on2} level {l2}')
+    rowd = lambda b: next(x for x in get()['launchpad']['rows'] if x['base'] == b)
     for pg, P in enumerate(get()['launchpad']['pages']):
         if S.PAGES[pg].get('synth'): continue                                    # Synths page: action pads, no samples
         page(pg)
-        for row in get()['launchpad']['rows']:
-            r = S.PAGES[pg]['rows'][row['base']]; deck, slot = r.get('deck', S.A), r['slot']
-            for i, label in enumerate(row['labels']):
-                if not label: continue
-                note, want = row['base'] + i, os.path.basename(r['samples'][i])
-                if lit(row['base']) == i: press(note)                            # already lit: a press would mute, so mute first
-                ok1 = press(note); on1, p1, l1 = lit(row['base']), path(deck, slot), prm(deck, 14 + slot)
-                ok2 = press(note); on2, l2 = lit(row['base']), prm(deck, 14 + slot)
-                check(f'{P} {row["name"]} pad {i + 1} ({label})', ok1 and ok2 and on1 == i and p1 == want and near(l1, r['level']) and on2 is None and l2 == 0.0,
-                      '' if on1 == i and p1 == want else f'lit {on1} {p1} level {round(l1, 2)} -> lit {on2} level {l2}')
+        rows_ = get()['launchpad']['rows']
+        if pg == 0 and not any('page2' in x for x in rows_): print('SKIP  row page buttons  pads.py from before the row page button: restart it', flush=True)
+        for row in rows_:
+            row_pads(P, pg, row)
+            if row.get('page2') is None: continue                                # a row with a page 2: its round button, then every pad there
+            b = row['base']; r = S.PAGES[pg]['rows'][b]; deck, slot = r.get('deck', S.A), r['slot']; s0 = (path(deck, slot), prm(deck, 14 + slot))
+            idle(); r1 = post('/rowpage', {'base': b}); g = rowd(b)
+            check(f'{P} {row["name"]} row page button -> page {g["page2"] + 1}', r1['ok'] and g['page2'] == 1 - row['page2'] and g['labels'] == maps.pad_labels(S.cur(r, g['page2']))
+                  and (path(deck, slot), prm(deck, 14 + slot)) == s0, f'{g["labels"]}')   # pads only: the sound is untouched
+            row_pads(P, pg, g)
+            idle(); r2 = post('/rowpage', {'base': b}); g = rowd(b)
+            check(f'{P} {row["name"]} row page button back', r2['ok'] and g['page2'] == row['page2'] and g['labels'] == row['labels'], f'page {g["page2"] + 1}')
 
     # ---- b) bank button and every move in every bank, on page 1 (Lowdown) with vocals, keys, bass and drums rows playing
     page(0); bank(0)

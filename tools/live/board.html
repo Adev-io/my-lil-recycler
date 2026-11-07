@@ -43,6 +43,8 @@
   button.round.bank.lit { background: var(--accent); color: #1a1205; }
   button.round.machine { border-color: #ffd93a; color: #ffd93a; }                /* drum machine on / off: filled = on */
   button.round.machine.lit { background: #ffd93a; color: #1a1205; }
+  button.round.rowpage { border-color: var(--c); color: var(--c); }               /* a row's sample page 1 / 2: filled = page 2 */
+  button.round.rowpage.lit { background: var(--c); color: #1a1205; }
   .pagename { font: 600 12px var(--mono); letter-spacing: .08em; color: var(--accent); margin-left: 10px; text-transform: uppercase; }
   .pad { width: 58px; height: 58px; border-radius: 7px; background: var(--pad-off); border: 0; padding: 5px;
          display: flex; align-items: flex-end; justify-content: flex-start; text-align: left;
@@ -140,7 +142,7 @@ function buildLaunchpad(L) {
   lp.querySelectorAll('.mode').forEach(b => b.onclick = () => setMode(b.dataset.mode));
   lp.insertAdjacentHTML('beforeend', '<div></div>');
   const byBase = Object.fromEntries(L.rows.map(r => [r.base, r]));                      // rows sit on their hardware row; a missing row stays empty
-  const rows = [...[81, 71, 61, 51, 41, 31, 21].map(b => byBase[b] ? { name: byBase[b].name, color: LP[byBase[b].color] || '#888', base: b, labels: byBase[b].labels }
+  const rows = [...[81, 71, 61, 51, 41, 31, 21].map(b => byBase[b] ? { name: byBase[b].name, color: LP[byBase[b].color] || '#888', base: b, labels: byBase[b].labels, page2: byBase[b].page2 }
                                                     : { name: '', color: 'transparent', base: b, labels: [] }),
                 { name: `moves ${L.bank + 1}/${L.banks}`, color: LP[L.color] || '#888', base: 11, labels: null }];
   for (const r of rows) {
@@ -160,10 +162,14 @@ function buildLaunchpad(L) {
       ? `<button class="round bank${L.bank ? ' lit' : ''}" title="more moves: bank ${(L.bank + 1) % L.banks + 1} of ${L.banks}">&#9654;</button>`
       : r.base === 21                                               // end of the drums row: My lil Drums (drum machine) on / off
       ? `<button class="round machine${L.machine ? ' lit' : ''}" title="drum machine (My lil Drums) on / off: the drums row pads are the record's drums">&#9679;</button>`
+      : r.page2 !== null && r.page2 !== undefined                  // end of a row with a page 2: flips that row's samples 1 <-> 2
+      ? `<button class="round rowpage${r.page2 ? ' lit' : ''}" data-base="${r.base}" style="--c:${r.color}" title="${r.name} page ${r.page2 + 1}/2: more samples">${r.page2 ? '2' : '&#9654;'}</button>`
       : '<div class="round"></div>');
   }
   lp.querySelectorAll('.bank').forEach(b => b.onclick = async () => { await post('/bank', {}); poll(); });
   lp.querySelectorAll('.machine').forEach(b => b.onclick = async () => { await post('/machine', {}); poll(); });
+  lp.querySelectorAll('.rowpage').forEach(b => b.onclick = async () => {
+    const r = await post('/rowpage', { base: +b.dataset.base }); if (!r.ok) flashBanner('busy or not taken: try again'); poll(); });
 }
 function updateLaunchpad(L) {
   $('lphw').textContent = L.hw ? '· connected' : '· not plugged in (page only)';
@@ -251,7 +257,7 @@ async function poll() {
   catch { $('sub').textContent = 'page server not answering: is pads.py running?'; return; }
   if (last && s.v && last.v && s.v !== last.v) { location.reload(); return; }   // board.html changed on disk: load the new page
   last = s;
-  const key = JSON.stringify([s.launchpad.page, s.launchpad.rows.map(r => [r.name, r.labels]), s.launchpad.fx.map(f => f.name),
+  const key = JSON.stringify([s.launchpad.page, s.launchpad.rows.map(r => [r.name, r.labels, r.page2]), s.launchpad.fx.map(f => f.name),
                               s.minilab && [s.minilab.mode, s.minilab.knobs.map(k => k.label), s.minilab.pads.length]]);
   if (key !== shape) { shape = key; buildLaunchpad(s.launchpad); if (s.minilab) buildMinilab(s.minilab); }
   updateLaunchpad(s.launchpad); if (s.minilab) updateMinilab(s.minilab);

@@ -5,7 +5,7 @@ import json, os, sys, time, threading, importlib, http.server
 import sections as S, fx, maps
 PORT, ORIGIN = 2700, 'http://127.0.0.1:2700'
 cache, lock = {'t': 0.0, 'p': {}}, threading.Lock()
-PRESS, ST, TURN, MODE, FLIP, MACHINE = None, None, None, None, None, None
+PRESS, ST, TURN, MODE, FLIP, MACHINE, ROWFLIP = None, None, None, None, None, None, None
 
 def params(mods):                                       # Rack params per module, cached 0.5 s (the page polls every 0.5 s)
     with lock:
@@ -28,8 +28,9 @@ def launchpad():
         rows = [dict(name=n, base=b, color=c, labels=[P[b + i][0] if b + i in P else '' for i in range(8)], on=None,
                      lit=[i for i in range(8) if b + i in lit]) for b, (n, c) in sorted(synths.ROWS.items(), reverse=True)]
     else:
-        rows = [dict(name=r['name'], base=b, color=r['color'], labels=maps.pad_labels(r['samples']), on=on.get(b))
-                for b, r in sorted(S.PAGES[pg]['rows'].items(), reverse=True)]
+        rp = lambda b: ST.get('rowpage', {}).get((pg, b), 0)          # row page on show (pads.rowflip); page2 None = the row has no page 2
+        rows = [dict(name=r['name'], base=b, color=r['color'], labels=maps.pad_labels(S.cur(r, rp(b))), on=on.get(b),
+                     page2=rp(b) if r.get('samples2') else None) for b, r in sorted(S.PAGES[pg]['rows'].items(), reverse=True)]
     bank = ST['bank']
     return dict(rows=rows, page=pg, pages=[p['name'] for p in S.PAGES], bank=bank, banks=len(fx.BANKS), machine=ST['machine'],
                 fx=[dict(note=n, name=nm, on=nm in ST['fx'] or nm in fx.vox_lit(ST)) for n, nm in sorted(fx.BANKS[bank].items())],
@@ -80,6 +81,7 @@ class H(http.server.BaseHTTPRequestHandler):
             if self.path == '/mode': return self.send(200, {'ok': MODE(str(d['mode']))})
             if self.path == '/bank': return self.send(200, {'ok': FLIP()})
             if self.path == '/machine': return self.send(200, {'ok': True, 'on': MACHINE()})
+            if self.path == '/rowpage': return self.send(200, {'ok': ROWFLIP(int(d['base']))})   # row-end round button: that row's sample page 1 <-> 2
             if self.path == '/set':
                 set_pad(int(d['pad'])) if 'pad' in d else set_cc(int(d['cc']), int(d['value']))
                 if 'pad' in d or d.get('log', True): sys.stderr.write(time.ctime() + f' page set {mode()} {d}\n')   # pads.log: what the page moved
@@ -87,9 +89,9 @@ class H(http.server.BaseHTTPRequestHandler):
         except Exception as e: return self.send(500, {'ok': False, 'error': str(e)[:200]})
         self.send(404, {})
 
-def start(press, state, turn, mode, flip, machine):
-    global PRESS, ST, TURN, MODE, FLIP, MACHINE
-    PRESS, ST, TURN, MODE, FLIP, MACHINE = press, state, turn, mode, flip, machine
+def start(press, state, turn, mode, flip, machine, rowflip=lambda b: False):
+    global PRESS, ST, TURN, MODE, FLIP, MACHINE, ROWFLIP
+    PRESS, ST, TURN, MODE, FLIP, MACHINE, ROWFLIP = press, state, turn, mode, flip, machine, rowflip
     srv = http.server.ThreadingHTTPServer(('127.0.0.1', PORT), H)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv

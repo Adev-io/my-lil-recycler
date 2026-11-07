@@ -242,6 +242,54 @@ try:
     bank_[0] = fx.FX; assert P['press'](18) is True and done == [('fx_act', 'clean')], done   # clean (bank 1 pad 18) never dropped by busy
     assert P['state']['busy'] is True                                             # and leaves busy to the press that set it
 finally: fx.vox_stut = real_vox['vox_stut']
+R81 = S.ROWS[81]                                                                 # row page 2 (row-end round button, CC base + 8)
+assert maps.pad_labels(R81['samples2']) == ['15', '16', '12', '04', '04 choir', '14 choir', '15 choir'], maps.pad_labels(R81['samples2'])
+for pg in S.PAGES:
+    for b, r in pg['rows'].items():
+        if 'samples2' not in r: continue
+        l2 = maps.pad_labels(r['samples2']); assert 0 < len(l2) <= 8 and all(l2) and len(set(l2)) == len(l2), (r['name'], l2)
+        assert all(os.path.exists(p) for p in r['samples2']), (r['name'], 'a page 2 pad points at a missing file')
+        assert not set(r['samples2']) & set(r['samples']), (r['name'], 'a sample on both row pages')
+        assert b not in (11, 21), (r['name'], 'row-end CC 19 / 29 = moves bank / drum machine')
+src_p = open(os.path.join(S.here, 'pads.py'), encoding='utf-8').read()
+keep = [n for n in ast.parse(src_p).body if (isinstance(n, ast.FunctionDef) and n.name in ('rowflip', 'pad', 'act'))
+        or (isinstance(n, ast.Assign) and any(getattr(t, 'id', None) in ('ROW_CC', 'L', 'RP') for t in n.targets))]
+assert len(keep) == 6, [getattr(n, 'name', None) for n in keep]
+played, logs, real_play = [], [], S.play
+st2 = {'page': 0, 'busy': False, 'acts': 0, 'rowpage': {}, 'on': [{} for _ in S.PAGES], 'path': [{} for _ in S.PAGES]}
+Q2 = dict(state=st2, sections=S, fx=fx, os=os, time=__import__('time'), traceback=__import__('traceback'), importlib=types.SimpleNamespace(reload=lambda m: m),
+          MOVES=lambda: {}, SYN=lambda: bool(S.PAGES[st2['page']].get('synth')), R=lambda: S.PAGES[st2['page']]['rows'], ON=lambda: st2['on'][st2['page']],
+          paint=lambda: None, LOG=types.SimpleNamespace(write=logs.append))
+exec(compile(ast.Module(body=keep, type_ignores=[]), 'pads.py', 'exec'), Q2)
+try:
+    S.play = lambda slot, path, level, deck=None: played.append((slot, path, level, deck))
+    rf, pad, act, on = Q2['rowflip'], Q2['pad'], Q2['act'], st2['on'][0]
+    s1, s2 = R81['samples'], R81['samples2']
+    assert Q2['ROW_CC'] == {39: 31, 49: 41, 59: 51, 69: 61, 79: 71, 89: 81}, Q2['ROW_CC']               # 19 / 29 (bank, machine) left alone
+    assert pad(88) == (81, 7) and rf(81) and st2['rowpage'] == {(0, 81): 1} and pad(88) is None and pad(87) == (81, 6)   # page 2: 7 pads
+    act(85); assert played[-1] == (3, s2[4], R81['level'], None) and on[81] == 4 and st2['path'][0][81] == s2[4], (played, on)   # page 2 pad 5 plays samples2[4]
+    rf(81); assert on[81] is None and st2['path'][0][81] == s2[4]          # page 1 on show: the playing page-2 sample lights nothing
+    rf(81); assert on[81] == 4                                             # back on page 2: lit again
+    act(85); assert played[-1][1] is None and on[81] is None and st2['path'][0][81] is None   # lit pad again = muted
+    rf(81); assert on[81] is None; rf(81); assert on[81] is None
+    rf(81); act(81); assert played[-1][1] == s1[0] and on[81] == 0            # page 1 pad 1, then page 2 shows nothing lit, page 1 lit again
+    rf(81); assert on[81] is None and st2['rowpage'][(0, 81)] == 1; rf(81); assert on[81] == 0
+    n = len(played); assert not rf(71) and not rf(21) and len(played) == n   # rows without a page 2: nothing, never a sound
+    st2['busy'] = True; assert not rf(81); st2['busy'] = False
+    st2['page'] = 1; assert not rf(81); st2['page'] = 2; assert not rf(81); st2['page'] = 0   # TOOM vocals has no page 2; Synths page: no rows
+    assert not [l for l in logs if 'Traceback' in l], logs
+    vst = {'params': [{'id': 14 + k, 'value': 1.0 if k == 3 else 0.0} for k in range(4)], 'data': {'slots': [{'path': ''}] * 3 + [{'path': s2[2]}]}}
+    S.call = lambda name, args=None: json.dumps(vst); ps = {}                 # sections.now with row pages: index in the list on show
+    assert S.now({81: R81}, {81: 1}, ps) == {81: 2} and ps == {81: s2[2]} and S.now({81: R81}) == {81: None}, ps
+    vst['params'][3]['value'] = 0.0; assert S.now({81: R81}, {81: 1}, ps) == {81: None} and ps == {81: None}
+    import board; board.ST = dict(st2, bank=0, machine=True, fx=set(), vox={}, hw=False)   # the console: labels of the row page on show
+    rows = {r['base']: r for r in board.launchpad()['rows']}
+    assert rows[81]['labels'] == maps.pad_labels(s1) and rows[81]['page2'] == 0 and rows[71]['page2'] is None, rows[81]
+    rf(81); board.ST['rowpage'] = st2['rowpage']; rows = {r['base']: r for r in board.launchpad()['rows']}
+    assert rows[81]['labels'][:7] == maps.pad_labels(s2) and rows[81]['page2'] == 1 and rows[81]['on'] is None, rows[81]
+finally: S.play, S.call = real_play, real_vox['call']
+print('Row page 2 offline: Lowdown vocals page 2 =', maps.pad_labels(R81['samples2']), '| CC 89 flips (39..89, not 19 / 29), page 2 pad plays samples2[i], lit follows the sample'
+      ' playing across flips, mute, busy / no page 2 / TOOM / Synths refused, sections.now by row page, console labels + page2')
 print('Vox fixes offline: record before write (failed hold stays held + lit, its note off lets go), quick-stab let go retried once, clean per deck + first error raised,'
       ' no_stut drops 40-44, sections.play state has no params, pads.press/on_msg: second vox press while busy not dropped, clean past busy, other moves still wait')
 print('Vox offline: FX3 12-15, one set_params call per hold / let go, slide = length only, first up keeps the second, latest up = back to the first length,'

@@ -76,7 +76,9 @@ ROWS = {
     81: dict(name='vocals', slot=3, level=1.0, color=53,               # Ari kept pads 1-2 (09:10); 2026-11-06 + the first verse he sings and rolls
              samples=[CHOP_V, P('6-vocals-14-115bpm.wav'), VC + '6-vocals-02_verse-115bpm-chop4.wav', P('6-vocals-03-115bpm.wav'),
                       VC + '6-vocals-02_build-115bpm-chop4.wav', VC + '6-vocals-03_heyboy-115bpm-chop4.wav',
-                      VC + '6-vocals-04_choir-115bpm-chop4.wav', VC + '6-vocals-12_choir-115bpm.wav']),   # verse, verse 03, "Baby's" roll, "Hey boy" roll, then the choir ALONE (karaoke split, no lead): "Ooh... oh I wonder wonder wonder who" (04, 4 bars), "Oh wonder... ooh" (12)
+                      VC + '6-vocals-04_choir-115bpm-chop4.wav', VC + '6-vocals-12_choir-115bpm.wav'],   # verse, verse 03, "Baby's" roll, "Hey boy" roll, then the choir ALONE (karaoke split, no lead): "Ooh... oh I wonder wonder wonder who" (04, 4 bars), "Oh wonder... ooh" (12)
+             samples2=[P('6-vocals-15-115bpm.wav'), P('6-vocals-16-115bpm.wav'), P('6-vocals-12-115bpm.wav'), P('6-vocals-04-115bpm.wav'),   # row page 2 (round button at the
+                       VC + '6-vocals-04_choir-115bpm.wav', VC + '6-vocals-14_choir-115bpm.wav', VC + '6-vocals-15_choir-115bpm.wav']),   # row's end, CC 89): loops 15, 16, 12, 04, then the choir alone 04 / 14 / 15
     71: dict(name='keys',   slot=1, level=1.2, color=45, samples=[P(f'4-piano-{n}-115bpm.wav') for n in ('14', '15', '16', '13', '03', '09', '10', '17')]),
     61: dict(name='bridge keys', slot=1, level=1.2, color=21,          # same slot as keys: a bridge pad swaps the row 2 piano out
              samples=[P(f'4-piano-{n}-115bpm-chop4.wav') for n in ('08', '09', '10', '13')]),   # 4-bar bridge halves: 08 C#-C-B-G#, 09/10 F#-B, 13 D-C#-C-A#
@@ -129,10 +131,14 @@ def play(slot, path, level, deck=None):                        # path None = mut
             st['data']['slots'][slot]['path'] = path; st.pop('params', None)   # data only: a STUT press between the get and the set stays
             call('vcvrack_set_module_state', {'id': deck, 'state': st})
     call('vcvrack_set_params', {'moduleId': deck, 'params': [{'id': 14 + slot, 'value': level if path else 0.0}]})
-def now(rows=None):                                            # row -> index of the sample playing (None = muted), read from the rig
-    out = {}
-    for b, r in (rows or ROWS).items():
+def cur(r, p2=0):                                              # a row's sample list on show: page 2 (samples2) or page 1
+    return r['samples2'] if p2 and r.get('samples2') else r['samples']
+def now(rows=None, pages=None, paths=None):                    # row -> index of the sample playing (None = muted), read from the rig.
+    out = {}                                                   # pages: row -> 0/1 (row page on show, default 1); the index is in that
+    for b, r in (rows or ROWS).items():                        # list, None when the sample playing sits on the other row page.
         st = json.loads(call('vcvrack_get_module_state', {'id': r.get('deck', A)})); lv = {p['id']: p['value'] for p in st['params']}
-        path = st['data']['slots'][r['slot']]['path']
-        out[b] = r['samples'].index(path) if lv[14 + r['slot']] > 0.01 and path in r['samples'] else None
+        path = st['data']['slots'][r['slot']]['path']; L = cur(r, (pages or {}).get(b, 0))
+        on = lv[14 + r['slot']] > 0.01 and path in r['samples'] + r.get('samples2', [])
+        out[b] = L.index(path) if on and path in L else None
+        if paths is not None: paths[b] = path if on else None  # paths: filled with row -> the row's sample playing (None = muted)
     return out

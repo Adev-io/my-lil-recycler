@@ -6,6 +6,8 @@
 # Acid Env (acid.py env: filter + amp ADSR).
 # Top-row arrows left/right (CC 93/94) = previous/next page (sections.PAGES: 1 Lowdown, 2 Time Out Of Mind, 3 Synths). A page turn changes
 # only the pads, never the sound; each page remembers what its rows play. Lit arrow = there is a page that way.
+# Right column round button at a row's end (CC row base + 8, e.g. 89 = vocals) = that row's sample page 1 / 2 (sections row 'samples2'),
+# pads only; lit in the row colour on page 2, dim on page 1, dark on rows without a page 2. A pad is lit only if its sample is the one playing.
 # Page 3 Synths (synths.py): acid patterns / moves, held fills, arp dir / oct / interval, auto change; the moves row acts on the song last shown.
 # MIDI only plus one MCP batch per press; sections.py and fx.py are reloaded per press. Stops when pads.stop exists. Log: pads.log.
 import os, sys, time, threading, traceback, importlib, subprocess, mido
@@ -14,7 +16,8 @@ LOG = open(os.path.join(here, 'pads.log'), 'a', buffering=1); sys.stderr = LOG
 import sections, fx, synths
 STOP = os.path.join(here, 'pads.stop')
 state = {'on': [{} for _ in sections.PAGES], 'page': 0, 'busy': False, 'fx': set(), 'gen': 0, 'dgen': 0, 'snap': None, 'hw': False, 'swept': [], 'tgen': 0, 'hush': {}, 'bank': 0, 'saved': {}, 'agen': 0, 'machine': True, 'fgen': 0, 'fading': False, 'acts': 0,
-         'song': 0, 'held': set(), 'auto': set(), 'phrase': 8, 'egen': {}, 'edir': {}, 'slit': set(), 'down': set(), 'vox': {}}   # egen / edir: per entry move (acid, arp); vox: fx.vox_on
+         'song': 0, 'held': set(), 'auto': set(), 'phrase': 8, 'egen': {}, 'edir': {}, 'slit': set(), 'down': set(), 'vox': {},   # egen / edir: per entry move (acid, arp); vox: fx.vox_on
+         'rowpage': {}, 'path': [{} for _ in sections.PAGES]}   # rowpage: (page, row) -> 1 = row page 2 on show; path: per page row -> sample playing
 HUSH = {'drums only': (1, 2, 3, 5, 6), 'no drums': (0, 4)}       # Mixer strips each move silences: drums only = Acid, decks A/B,
                                                                  # Acid Voice, Triple; no drums = My lil Drums + the drum stem
 lp = lambda names, pre: next((x for x in names if x.startswith(pre)), None)        # Launchpad unplugged -> page only
@@ -45,6 +48,18 @@ HOLDL = threading.RLock()                                        # hold on / let
 ELOCK = threading.Lock()                                         # acid / arp entry: generation bump + direction, and a run's end check
 ARROWS = {93: -1, 94: 1}                                         # top row: left / right arrow (programmer mode CC)
 MACHINE_CC = 29                                                  # right column, round button at the end of the drums row
+ROW_CC = {b + 8: b for b in range(31, 91, 10)}                 # right column round buttons at the end of rows 3-8 (CC 39..89; 19 / 29 taken)
+L = lambda pg, b: sections.cur(sections.PAGES[pg]['rows'][b], state['rowpage'].get((pg, b), 0))   # a row's sample list on show
+RP = lambda pg: {b: state['rowpage'].get((pg, b), 0) for b in sections.PAGES[pg]['rows']}         # row pages of a page, for sections.now
+def rowflip(b):                                                 # a row's round button: its sample page 1 <-> 2 (pads only, never the sound)
+    pg = state['page']; r = None if SYN() else R().get(b)
+    if not (r and r.get('samples2')) or state['busy']: return False
+    on, old = state['on'][pg], L(pg, b); i = on.get(b); was = state['path'][pg].get(b)
+    p = old[i] if i is not None and i < len(old) else (None if was in old else was)   # nothing lit + the remembered sample on this list = muted
+    state['rowpage'][(pg, b)] = 1 - state['rowpage'].get((pg, b), 0); new = L(pg, b)
+    on[b] = new.index(p) if p in new else None; state['path'][pg][b] = p   # lit only if the sample playing is on the list now shown
+    state['acts'] += 1                                           # a 5 s refresh read during the flip is stale
+    LOG.write(time.ctime() + f" {r['name']} row page {state['rowpage'][(pg, b)] + 1}\n"); paint(); return True
 def machine():                                                  # My lil Drums on / off, apart from the tracked drums (stem row)
     import maps; state['machine'] = maps.drum_machine(); LOG.write(time.ctime() + f" drum machine {'on' if state['machine'] else 'off'}\n"); paint(); return state['machine']
 MOVES = lambda: fx.BANKS[state['bank']]                           # moves row: bank 1 (fx.FX) or bank 2 (fx.FX2), flipped by fx.BANK_CC
@@ -83,7 +98,7 @@ def minilab(m):                                                 # swap (or resta
 def pad(note):                                                  # note -> (row base, sample index) or None
     if SYN(): return None
     for b, r in R().items():
-        if b <= note < b + len(r['samples']): return b, note - b
+        if b <= note < b + len(L(state['page'], b)): return b, note - b
 def paint():
     for n in range(11, 90): led(n, 0)
     if SYN():                                                    # Synths page: what is live now (or held) blinks, like the sample rows
@@ -92,7 +107,7 @@ def paint():
             if n in lit: led(n, 0); led(n, 45, ch=1)
             else: led(n, synths.ROWS[n // 10 * 10 + 1][1])
     for b, r in R().items():
-        for i in range(len(r['samples'])):
+        for i in range(len(L(state['page'], b))):
             if ON().get(b) == i: led(b + i, 0); led(b + i, 45, ch=1)    # engaged: blinks blue (ch 1 alternates with the ch 0 colour, off)
             else: led(b + i, r['color'])
     vl = fx.vox_lit(state)
@@ -102,6 +117,9 @@ def paint():
     cc_ = lambda c, v: lp_send(mido.Message('control_change', control=c, value=v))
     cc_(fx.BANK_CC, fx.COLOR if state['bank'] else 1)           # lit = bank 2
     cc_(MACHINE_CC, 13 if state['machine'] else 1)              # yellow = machine on
+    for cc, b in ROW_CC.items():                                 # row page buttons: row colour = page 2, dim = page 1, dark = no page 2
+        r = None if SYN() else R().get(b)
+        cc_(cc, (r['color'] if state['rowpage'].get((state['page'], b)) else 1) if r and r.get('samples2') else 0)
     for cc, d in ARROWS.items(): cc_(cc, 3 if 0 <= state['page'] + d < len(sections.PAGES) else 0)
     for cc, m in MODE_CC.items(): cc_(cc, 37 if mode_now() == m else 1)   # the MiniLab mode on show: lit cyan, the others dim
 def turn(d):                                                    # arrow: next / previous page (pads only)
@@ -293,13 +311,14 @@ def act(note, hw=False):
         if note in MOVES(): fx_act(MOVES()[note])                    # (vox holds + clean go through side(), never here)
         elif SYN(): synth_act(note, hw)
         else:
-            rows, on = R(), ON(); b, i = pad(note); r = rows[b]
+            rows, on = R(), ON(); b, i = pad(note); r = rows[b]; pg0 = state['page']; Ls = L(pg0, b)   # the row's list on show (row page 1 or 2)
             i = None if on.get(b) == i else i                          # lit pad again = mute the row
-            sections.play(r['slot'], r['samples'][i] if i is not None else None, r['level'], r.get('deck')); on[b] = i
-            for pg, pon in zip(sections.PAGES, state['on']):             # rows sharing this deck slot, on any page, are no longer playing
+            p = Ls[i] if i is not None else None
+            sections.play(r['slot'], p, r['level'], r.get('deck')); on[b] = i; state['path'][pg0][b] = p
+            for pg, pon, pth in zip(sections.PAGES, state['on'], state['path']):   # rows sharing this deck slot, on any page, are no longer playing
                 for o, ro in pg['rows'].items():
-                    if ro is not r and ro['slot'] == r['slot'] and ro.get('deck') == r.get('deck') and i is not None: pon[o] = None
-            LOG.write(time.ctime() + f" {r['name']} " + (os.path.basename(r['samples'][i]) if i is not None else 'muted') + '\n')
+                    if ro is not r and ro['slot'] == r['slot'] and ro.get('deck') == r.get('deck') and i is not None: pon[o] = None; pth[o] = None
+            LOG.write(time.ctime() + f" {r['name']} " + (os.path.basename(p) if p else 'muted') + '\n')
     except Exception: LOG.write(traceback.format_exc())
     state['acts'] += 1; state['busy'] = False; paint()
 def press(note, hw=False):                                      # hardware pad (hw) or a click on the page (board.py): same path
@@ -323,8 +342,9 @@ def on_msg(msg):
     elif msg.type == 'control_change' and msg.value and msg.control in MODE_CC: minilab(MODE_CC[msg.control])
     elif msg.type == 'control_change' and msg.value and msg.control == fx.BANK_CC: flip()
     elif msg.type == 'control_change' and msg.value and msg.control == MACHINE_CC: threading.Thread(target=machine, daemon=True).start()
+    elif msg.type == 'control_change' and msg.value and msg.control in ROW_CC: rowflip(ROW_CC[msg.control])
 open(os.path.join(here, 'page.txt'), 'w').write('0')
-try: sections.base(); state['on'] = [sections.now(p['rows']) if p['rows'] else {} for p in sections.PAGES]
+try: sections.base(); state['on'] = [sections.now(p['rows'], RP(k), state['path'][k]) if p['rows'] else {} for k, p in enumerate(sections.PAGES)]
 except Exception: LOG.write(traceback.format_exc())
 def _scale():
     try: synths.follow(SP)
@@ -347,7 +367,7 @@ def auto_loop():                                                # phrase auto-ch
                 if SYN(): state['slit'] = synths.lit(state); paint()
             except Exception: LOG.write(traceback.format_exc())
 threading.Thread(target=auto_loop, daemon=True).start()
-import board; board.start(press, state, turn, minilab, flip, machine)
+import board; board.start(press, state, turn, minilab, flip, machine, rowflip)
 LOG.write(time.ctime() + f" start rows {state['on']} fx row {list(fx.FX.values())} launchpad {'on' if out else 'missing: page only'}"
           f" page http://127.0.0.1:{board.PORT}\n")
 try: paint()
@@ -379,8 +399,9 @@ while not os.path.exists(STOP):
         except Exception as e:
             if state.get('inp_err') != str(e): state['inp_err'] = str(e); LOG.write(time.ctime() + f' launchpad input reopen failed: {e}\n')
         try:                                                    # faders, Rack itself) light up or go dark on both pages too
-            n0 = state['acts']; fresh = [sections.now(p['rows']) if p['rows'] else {} for p in sections.PAGES]
-            if not state['busy'] and state['acts'] == n0: state['on'] = fresh   # a press during the read wins: that snapshot is stale
+            n0 = state['acts']; paths = [{} for _ in sections.PAGES]
+            fresh = [sections.now(p['rows'], RP(k), paths[k]) if p['rows'] else {} for k, p in enumerate(sections.PAGES)]
+            if not state['busy'] and state['acts'] == n0: state['on'], state['path'] = fresh, paths   # a press / row flip during the read wins: that snapshot is stale
             state['machine'] = next(x['value'] for x in sections.json.loads(sections.call('vcvrack_get_params', {'moduleId': sections.DRUMS})) if x['id'] == 5) > 0.001
             cur = fx.strips()                                    # in/out moves lit by what the strips really are
             for name, (k, _) in list(fx.STRIP_TOGGLE.items()) + ([('drums in/out', (4, 0))] if not state['fading'] else []):
