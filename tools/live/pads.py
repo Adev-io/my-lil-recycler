@@ -13,6 +13,7 @@
 import os, sys, time, threading, traceback, importlib, subprocess, mido
 here = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, here)
 LOG = open(os.path.join(here, 'pads.log'), 'a', buffering=1); sys.stderr = LOG
+import faulthandler; faulthandler.enable(file=LOG, all_threads=True)   # a native crash leaves its thread stacks in pads.log
 import sections, fx, synths
 STOP = os.path.join(here, 'pads.stop')
 state = {'on': [{} for _ in sections.PAGES], 'page': 0, 'busy': False, 'fx': set(), 'gen': 0, 'dgen': 0, 'snap': None, 'hw': False, 'swept': [], 'tgen': 0, 'hush': {}, 'bank': 0, 'saved': {}, 'agen': 0, 'machine': True, 'fgen': 0, 'fading': False, 'acts': 0,
@@ -22,6 +23,19 @@ HUSH = {'drums only': (1, 2, 3, 5, 6), 'no drums': (0, 4)}       # Mixer strips 
                                                                  # Acid Voice, Triple; no drums = My lil Drums + the drum stem
 lp = lambda names, pre: next((x for x in names if x.startswith(pre)), None)        # Launchpad unplugged -> page only
 lock = threading.Lock()                                          # Launchpad sends AND closes happen under it: send on a closed rtmidi port = segfault
+_dead = []          # ports that must never be closed or freed again: RtMidi WinMM closePort on an unplugged device frees its sysex buffers, then fails
+                    # (midiInUnprepareHeader) with connected_ still true, so a second close (mido __del__ / ~MidiIn) double-frees = silent native crash.
+                    # Referenced here for good; os._exit at the end of the file skips interpreter teardown, so no __del__ ever runs on them.
+def park_or_close(port, gone=None):                              # gone: its device left the port list (None = look it up). Gone or a close that raises = parked
+    if port is None: return
+    try: port.callback = None                                    # an input stops calling on_msg first
+    except Exception: pass
+    if gone is None:
+        try: gone = port.name not in (mido.get_input_names() if port.is_input else mido.get_output_names())
+        except Exception: gone = False
+    if gone: _dead.append(port); return
+    try: port.close()
+    except Exception: _dead.append(port)
 PROG = mido.Message('sysex', data=[0x00, 0x20, 0x29, 0x02, 0x0D, 0x0E, 0x01])   # Launchpad Mini MK3 -> Programmer mode (a power-cycled one boots in Live mode)
 try: out = lp(mido.get_output_names(), 'MIDIOUT2 (LPMiniMK3'); out = out and mido.open_output(out)
 except Exception as e: out = None; LOG.write(time.ctime() + f' launchpad output open failed: {e}; the 5 s refresh retries\n')
@@ -35,8 +49,7 @@ def lp_send(msg):                                               # every Launchpa
         except Exception as e:
             out = None; state['hw'] = False                     # out goes None BEFORE the close, inside the lock: nobody can send on a closed port
             LOG.write(time.ctime() + f' launchpad output lost: {e}; retrying\n')
-            try: o.close()
-            except Exception: pass
+            park_or_close(o)
 def led(note, vel, ch=0): lp_send(mido.Message('note_on', channel=ch, note=note, velocity=vel))
 lp_send(PROG)
 R = lambda: sections.PAGES[state['page']]['rows']                # rows of the page on show
@@ -344,7 +357,7 @@ def on_msg(msg):
     elif msg.type == 'control_change' and msg.value and msg.control == MACHINE_CC: threading.Thread(target=machine, daemon=True).start()
     elif msg.type == 'control_change' and msg.value and msg.control in ROW_CC: rowflip(ROW_CC[msg.control])
 open(os.path.join(here, 'page.txt'), 'w').write('0')
-try: sections.base(); state['on'] = [sections.now(p['rows'], RP(k), state['path'][k]) if p['rows'] else {} for k, p in enumerate(sections.PAGES)]
+try: sections.base(strips=not os.environ.get('PADS_RESPAWN')); state['on']   # pads_keep.py sets PADS_RESPAWN after a crash: leave the mixer as it is = [sections.now(p['rows'], RP(k), state['path'][k]) if p['rows'] else {} for k, p in enumerate(sections.PAGES)]
 except Exception: LOG.write(traceback.format_exc())
 def _scale():
     try: synths.follow(SP)
@@ -391,8 +404,7 @@ while not os.path.exists(STOP):
             names = mido.get_input_names()
             if inp is None or stale or getattr(inp, 'name', None) not in names:
                 if inp is not None:
-                    try: inp.close()
-                    except Exception: pass
+                    park_or_close(inp, getattr(inp, 'name', None) not in names)   # never close a port whose device vanished
                     inp = None; LOG.write(time.ctime() + ' launchpad input lost; retrying\n')
                 nm = lp(names, 'LPMiniMK3 MIDI')
                 if nm: inp = mido.open_input(nm, callback=on_msg); state['inp_err'] = None; LOG.write(time.ctime() + ' launchpad input back\n')
@@ -412,12 +424,11 @@ while not os.path.exists(STOP):
         try: paint()
         except Exception: LOG.write(traceback.format_exc())
         t = time.time()
-try: inp and inp.close()
-except Exception: pass
+park_or_close(inp); inp = None
 try:
     with HOLDL: fx.vox_clean(state)                              # stopping: no vox stutter left held in Rack
 except Exception: LOG.write(traceback.format_exc())
 for n in range(11, 90): led(n, 0)
 with lock: o, out = out, None
-try: o and o.close()
-except Exception: pass
+park_or_close(o)
+LOG.flush(); os._exit(0)                                         # no interpreter teardown: it would run __del__ (a second closePort) on parked ports

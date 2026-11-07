@@ -116,11 +116,11 @@ SCALES = {0: (1, 2, 4, 6, 7, 9, 11), 1: (1, 2, 4, 6, 7, 9, 11)}
 # 14 has A#: chromatic passing notes against D major).
 ACID_SONG = {0: [10, 8, 9], 1: [14, 15, 16, 19]}
 PAGES.append(dict(name='Synths', rows={}, synth=True))   # page 3: arp + acid controls (synths.py); moves act on the song last shown
-def base():                                                    # deck A + deck B strips; deck A slots without a row silent
+def base(strips=True):                                         # deck A + deck B strips; deck A slots without a row silent (strips=False: mixer strips untouched, a crash respawn)
     mix = {p['id']: p['value'] for p in json.loads(call('vcvrack_get_params', {'moduleId': MIX}))}
     if mix[3] < 0.05:                                          # deck B was closed: its page starts silent, then the strip opens
         call('vcvrack_set_params', {'moduleId': B, 'params': [{'id': 14 + k, 'value': 0.0} for k in range(4)]})
-    call('vcvrack_set_params', {'moduleId': MIX, 'params': [{'id': k, 'value': v} for k, v in enumerate((0.0, 0.0, U, U))] + [{'id': 40 + k, 'value': 0} for k in range(4)]})
+    if strips: call('vcvrack_set_params', {'moduleId': MIX, 'params': [{'id': k, 'value': v} for k, v in enumerate((0.0, 0.0, U, U))] + [{'id': 40 + k, 'value': 0} for k in range(4)]})
     rows = {r['slot'] for r in ROWS.values()}
     call('vcvrack_set_params', {'moduleId': A, 'params': [{'id': 14 + k, 'value': 0.0} for k in range(4) if k not in rows]})
 def play(slot, path, level, deck=None):                        # path None = mute the slot; a new path lands at the next loop start

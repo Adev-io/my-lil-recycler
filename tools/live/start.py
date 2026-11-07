@@ -9,7 +9,7 @@ PYW = r'C:\Users\Arikl\AppData\Local\Programs\Python\Python311\pythonw.exe'     
 STOP, LOG = os.path.join(here, 'pads.stop'), os.path.join(here, 'pads.log')
 ps = lambda cmd: subprocess.run(['powershell', '-NoProfile', '-Command', cmd], capture_output=True, text=True).stdout.split()
 rack_up = lambda: bool(ps("(Get-Process Rack -ErrorAction SilentlyContinue).Id"))
-pads_pids = lambda: ps("Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe'\" | Where-Object CommandLine -match 'pads[.]py' | ForEach-Object ProcessId")
+pads_pids = lambda: ps("Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe'\" | Where-Object CommandLine -match 'pads(_keep)?[.]py' | ForEach-Object ProcessId")   # pads.py + its pads_keep.py supervisor
 if rack_up(): print('Rack already running (plain launch restores the autosave; fine if it was dj-set.vcv)')
 else: subprocess.Popen([RACK, PATCH]); print('Rack launched on', os.path.basename(PATCH))
 for i in range(120):                                          # the MCP answers only once the audio engine runs (interface present)
@@ -22,10 +22,12 @@ if pads_pids():
     for _ in range(40):
         if not pads_pids(): break
         time.sleep(0.25)
+    else:                                                     # still up after 10 s: kill, or the supervisor outlives pads.stop and two would run
+        ps('Stop-Process -Force -Id ' + ','.join(pads_pids())); time.sleep(1)
     print('old pads.py stopped')
-if os.path.exists(STOP): os.remove(STOP)
+if os.path.exists(STOP): os.remove(STOP)                      # only now: the old supervisor has seen it and gone
 n = len(open(LOG, encoding='utf-8', errors='replace').readlines()) if os.path.exists(LOG) else 0
-subprocess.Popen([PYW, 'pads.py', sys.argv[1] if len(sys.argv) > 1 else '0'], cwd=here); time.sleep(5)
+subprocess.Popen([PYW, 'pads_keep.py', sys.argv[1] if len(sys.argv) > 1 else '0'], cwd=here); time.sleep(5)   # supervisor: relaunches pads.py if it dies
 new = open(LOG, encoding='utf-8', errors='replace').readlines()[n:]
 print(''.join(new[-3:]).rstrip() or 'pads.py wrote nothing yet')
 if any('StopIteration' in l for l in new): print('Launchpad not found: plug it in (Programmer mode), then `py -3 start.py` again')

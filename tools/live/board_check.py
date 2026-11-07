@@ -297,4 +297,18 @@ print('Vox offline: FX3 12-15, one set_params call per hold / let go, slide = le
 print('DnB offline: snapshot records the set tempo, release + clean return to it (128), a snapshot without bpm falls back to 120')
 print('Synths offline: auto_step mutate/next/undo + first-of-song + acid error keeps arp, hold-button release, octjump at 4, ramp cut-off, cancelled acid_out writes nothing after, acid_in floor 0.5, exception restores open, arp_in roll + ROLLS put back,'
       ' finished out after a newer press writes nothing, arp_in cut off in its roll writes no gate, held arp roll left alone')
+PD = {'_dead': [], 'mido': types.SimpleNamespace(get_input_names=lambda: ['gone-not-listed-here'], get_output_names=lambda: [])}   # pads.py park_or_close as written
+exec(compile(ast.Module(body=[n for n in ast.parse(src).body if isinstance(n, ast.FunctionDef) and n.name == 'park_or_close'], type_ignores=[]), 'pads.py', 'exec'), PD)
+class FakePort:
+    def __init__(s, name, boom=False): s.name, s.boom, s.closes, s.callback, s.is_input = name, boom, 0, 'cb', True
+    def close(s):
+        s.closes += 1
+        if s.boom: raise RuntimeError('midiInUnprepareHeader failed')
+bad, vanished, fine = FakePort('Launchpad', boom=True), FakePort('LPMiniMK3 MIDI'), FakePort('ok-port')
+PD['park_or_close'](bad, False); PD['park_or_close'](vanished, True); PD['park_or_close'](fine, False); PD['park_or_close'](None)
+assert bad.closes == 1 and PD['_dead'] == [bad, vanished], PD['_dead']           # a close that raises = parked (closed once, never again); a vanished port is never closed
+assert vanished.closes == 0 and fine.closes == 1 and fine not in PD['_dead'] and bad.callback is None and vanished.callback is None
+lookup = FakePort('Launchpad lookup', boom=True); PD['park_or_close'](lookup); assert lookup.closes == 0 and lookup in PD['_dead']   # gone=None: looked up, name not listed -> parked untried
+PD['mido'].get_input_names = lambda: ['listed']; listed = FakePort('listed', boom=True); PD['park_or_close'](listed); assert listed.closes == 1 and listed in PD['_dead']
+print('Dead port offline: a vanished port or a close that raises is parked in _dead, never closed again; a healthy port closes once')
 print('ok')

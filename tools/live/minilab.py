@@ -67,4 +67,9 @@ inp = mido.open_input(next(x for x in mido.get_input_names() if x.startswith('Mi
 open(os.path.join(here, 'minilab.mode'), 'w').write('mix')       # the page labels the MiniLab for this program
 log('start (pickup) ' + ', '.join(f'CC{c} {l}' for c, (_, _, _, l) in MAP.items()))
 while not os.path.exists(STOP): time.sleep(0.25)
-inp.close()
+try: inp.callback = None
+except Exception: pass
+try:                                                              # a vanished or failing port is left parked, and os._exit skips interpreter teardown (__del__)
+    if inp.name in mido.get_input_names(): inp.close()
+except Exception: pass
+LOG.flush(); os._exit(0)

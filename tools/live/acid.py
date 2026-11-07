@@ -102,10 +102,15 @@ log(f'start ({MODE}: {maps.MODES[MODE]["title"]}): keys play the bass, pads = ac
     + ('faders filter A/D/S/R, knobs amp A/D/S/R, env mod, accent, cutoff, resonance' if MODE == 'env'
        else 'faders cutoff/res/env/decay, knobs incl. arp gate / brightness / transpose'))
 while not os.path.exists(STOP): time.sleep(0.25)
-inp.close()
+try: inp.callback = None
+except Exception: pass
+try:                                                              # a vanished or failing port is left parked, and os._exit skips interpreter teardown (__del__)
+    if inp.name in mido.get_input_names(): inp.close()
+except Exception: pass
 for n in list(held): out.send(mido.Message('note_off', note=n))
 try: S.call('vcvrack_set_params', {'moduleId': ACID, 'params': [{'id': 25, 'value': 1.0}]})   # sequencer back on
 except Exception as e: log(f'stop: sequencer back on failed ({str(e)[:80]})')
 log('stopped')                                 # before acid.stop goes: pads.py's log-growth wait must not take this line for the new program's
 try: os.remove(STOP)
 except OSError: pass
+LOG.flush(); os._exit(0)
