@@ -352,7 +352,10 @@ def act(note, hw=False):
             for pg, pon, pth in zip(sections.PAGES, state['on'], state['path']):   # rows sharing this deck slot, on any page, are no longer playing
                 for o, ro in pg['rows'].items():
                     if ro is not r and ro['slot'] == r['slot'] and ro.get('deck') == r.get('deck') and i is not None: pon[o] = None; pth[o] = None
-            if i is not None and pg0 != state['song'] and not set(fx.heard(fx.strips(), state['path'])) - {pg0}: playing(pg0)   # first song in
+            if i is not None and not set(fx.heard(fx.strips(), state['path'])) - {pg0}:   # no other song heard: this one is first in
+                if pg0 != state['song']: playing(pg0)
+                d = fx.own_deck(pg0)                                   # a deck resting shut (Disco, e.g. after a restart) opens, else its pads play silent
+                if d in fx.REST and not state['fx'] & {'drums only', 'dnb'} and fx.strips()[fx.STRIP[d]] < 0.001: fx.strip(fx.STRIP[d], True)
             LOG.write(time.ctime() + f" {r['name']} " + (os.path.basename(p) if p else 'muted') + '\n')
     except Exception: LOG.write(traceback.format_exc())
     state['acts'] += 1; state['busy'] = False; paint()

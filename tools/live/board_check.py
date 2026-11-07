@@ -494,6 +494,12 @@ try:
     Q2['act'](71); assert st2['song'] == 0 and st2['on'][1][71] == 0             # Lowdown still heard: a TOOM pad cues, Lowdown stays playing
     st2['path'][0][71] = None; Q2['act'](72); assert st2['song'] == 1             # nothing else heard: TOOM is the song playing
     st2['page'] = 2; Q2['act'](71); assert st2['song'] == 1                      # TOOM heard: a Disco cue changes nothing
+    opened = []; real_strip = fx.strip; fx.strip = lambda k, on: opened.append((k, on))
+    try:
+        Q2['act'](72); assert opened == [], opened                               # TOOM heard: Disco strip stays shut (a cue)
+        st2['path'][1] = {}; st2['fx'] = {'drums only'}; Q2['act'](73); assert opened == [], opened   # drums only held: left shut
+        st2['fx'] = set(); Q2['act'](74); assert st2['song'] == 2 and opened == [(7, True)], opened   # nothing heard, strip 7 shut: Disco opens
+    finally: fx.strip = real_strip
     assert not [l for l in logs if 'Traceback' in l], logs
 finally: S.play, fx.strips = real_play, real_strips
 try:                                                                            # transition: an out deck already at strip 0 (a Disco cue) is left alone
