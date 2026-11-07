@@ -107,7 +107,7 @@
     <p class="tag">Arturia MiniLab 3</p>
     <div class="ml">
       <div class="top">
-        <div><h2><span id="mltitle">MiniLab 3</span><span class="modes" id="modes"><button data-mode="mix">drums + mix</button><button data-mode="acid">synths</button></span></h2><div class="knobs" id="knobs"></div></div>
+        <div><h2><span id="mltitle">MiniLab 3</span><span class="modes" id="modes"><button data-mode="mix">drums + mix</button><button data-mode="acid">synths</button><button data-mode="env">acid env</button></span></h2><div class="knobs" id="knobs"></div></div>
         <div><h2><span>faders</span></h2><div class="faders" id="faders"></div></div>
       </div>
       <div class="pads" id="mpads"></div>
@@ -129,7 +129,8 @@ function buildLaunchpad(L) {
   const lp = $('lp'); lp.innerHTML = '';
   const names = $('rownames'); names.innerHTML = '<div></div>';
   const arrows = { 2: [-1, '&#9664;', 'previous page'], 3: [1, '&#9654;', 'next page'] };   // top row 3rd/4th = left/right arrows
-  const modeBtn = { 5: ['mix', 'D', 'Drums button: MiniLab = drums + mix map'], 6: ['acid', 'K', 'Keys button: MiniLab = Synths (Acid Bass + arp)'] };
+  const modeBtn = { 5: ['mix', 'D', 'Drums button: MiniLab = drums + mix map'], 6: ['acid', 'K', 'Keys button: MiniLab = Synths (Acid Bass + arp)'],
+                    7: ['env', 'E', 'User button: MiniLab = Acid Env (filter + amp ADSR)'] };
   for (let c = 0; c < 8; c++) lp.insertAdjacentHTML('beforeend', modeBtn[c]
     ? `<button class="round mode" data-mode="${modeBtn[c][0]}" title="${modeBtn[c][2]}">${modeBtn[c][1]}</button>`
     : arrows[c]
@@ -229,7 +230,7 @@ function buildMinilab(M) {
       `<div class="keylbl">keys: ${M.keys}</div>`;
 }
 async function setMode(m) {
-  flashBanner(`switching the MiniLab to ${m === 'acid' ? 'Synths' : 'drums + mix'}…`); await post('/mode', { mode: m }); poll(); }
+  flashBanner(`switching the MiniLab to ${{ acid: 'Synths', env: 'Acid Env', mix: 'drums + mix' }[m]}…`); await post('/mode', { mode: m }); poll(); }
 document.querySelectorAll('#modes button').forEach(b => b.onclick = () => setMode(b.dataset.mode));
 function updateMinilab(M) {
   document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle(b.classList.contains('round') ? 'lit' : 'on', b.dataset.mode === M.mode));

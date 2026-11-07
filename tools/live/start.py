@@ -39,11 +39,11 @@ if ml_pids():
         if not ml_pids(): break
         time.sleep(0.25)
 if os.path.exists(MLSTOP): os.remove(MLSTOP)
-# the MiniLab program for the saved mode (minilab.mode: mix = drums + mix map, acid = Synths); pads.py does the swap,
-# the same as its Drums / Keys buttons. Switch later with those buttons or on the page.
+# the MiniLab program for the saved mode (minilab.mode: mix = drums + mix map, acid = Synths, env = Acid Env); pads.py does the
+# swap (acid / env -> acid.py <mode>), the same as its Drums / Keys / User buttons. Switch later with those buttons or on the page.
 import json, urllib.request
 MF = os.path.join(here, 'minilab.mode'); m = open(MF).read().strip() if os.path.exists(MF) else 'mix'
-logf = os.path.join(here, 'acid.log' if m == 'acid' else 'minilab.log')
+logf = os.path.join(here, 'acid.log' if m in ('acid', 'env') else 'minilab.log')
 n = len(open(logf, encoding='utf-8', errors='replace').readlines()) if os.path.exists(logf) else 0
 try: urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:2700/mode', data=json.dumps({'mode': m}).encode(),
                                                   headers={'Content-Type': 'application/json'}), timeout=10)

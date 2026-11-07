@@ -1,7 +1,8 @@
 # Launchpad Mini MK3 (Programmer mode) -> the set by rows. Each row in sections.ROWS = one slot (row 1 vocals, row 2 keys ...):
 # a pad picks that row's sample (blinking blue = playing), the lit pad again mutes the row. Pressed pad flashes white.
 # Row 8 (fx.FX) = transition moves; a toggled move blinks blue, pressing it again releases it. The moves row is on every page.
-# Top-row Drums / Keys buttons (CC 96/97) = MiniLab program: drums + mix map (minilab.py) / Synths (acid.py).
+# Top-row Drums / Keys / User buttons (CC 96/97/98) = MiniLab program: drums + mix map (minilab.py) / Synths (acid.py) /
+# Acid Env (acid.py env: filter + amp ADSR).
 # Top-row arrows left/right (CC 93/94) = previous/next page (sections.PAGES: 1 Lowdown, 2 Time Out Of Mind). A page turn changes
 # only the pads, never the sound; each page remembers what its rows play. Lit arrow = there is a page that way.
 # MIDI only plus one MCP batch per press; sections.py and fx.py are reloaded per press. Stops when pads.stop exists. Log: pads.log.
@@ -41,7 +42,7 @@ def machine():                                                  # My lil Drums o
 MOVES = lambda: fx.BANKS[state['bank']]                           # moves row: bank 1 (fx.FX) or bank 2 (fx.FX2), flipped by fx.BANK_CC
 def flip():                                                     # the round button at the end of the moves row: next bank of moves
     state['bank'] = (state['bank'] + 1) % len(fx.BANKS); LOG.write(time.ctime() + f" moves bank {state['bank'] + 1}\n"); paint(); return True
-MODE_CC = {96: 'mix', 97: 'acid'}                                # top row Drums / Keys buttons: MiniLab = drums + mix map / Synths
+MODE_CC = {96: 'mix', 97: 'acid', 98: 'env'}                     # top row Drums / Keys / User buttons: MiniLab = drums + mix map / Synths / Acid Env
 MODEF = os.path.join(here, 'minilab.mode')
 def mode_now():
     try: return open(MODEF).read().strip()
@@ -57,7 +58,7 @@ def minilab(m):                                                 # swap (or resta
             time.sleep(0.25)
         for n in ('acid.stop', 'minilab.stop'):                  # stale stop files would end the new program at once
             if os.path.exists(f(n)): os.remove(f(n))
-        subprocess.Popen([sys.executable, 'minilab.py' if m == 'mix' else 'acid.py'], cwd=here)   # acid.py stops minilab.py itself
+        subprocess.Popen([sys.executable, 'minilab.py'] if m == 'mix' else [sys.executable, 'acid.py', m], cwd=here)   # acid.py stops minilab.py itself
         LOG.write(time.ctime() + f' minilab -> {m}\n'); time.sleep(1.0); paint()
     threading.Thread(target=go, daemon=True).start(); return True
 def pad(note):                                                  # note -> (row base, sample index) or None
@@ -76,7 +77,7 @@ def paint():
     cc_(fx.BANK_CC, fx.COLOR if state['bank'] else 1)           # lit = bank 2
     cc_(MACHINE_CC, 13 if state['machine'] else 1)              # yellow = machine on
     for cc, d in ARROWS.items(): cc_(cc, 3 if 0 <= state['page'] + d < len(sections.PAGES) else 0)
-    for cc, m in MODE_CC.items(): cc_(cc, 37 if mode_now() == m else 1)   # the MiniLab mode on show: lit cyan, the other dim
+    for cc, m in MODE_CC.items(): cc_(cc, 37 if mode_now() == m else 1)   # the MiniLab mode on show: lit cyan, the others dim
 def turn(d):                                                    # arrow: next / previous page (pads only)
     p = state['page'] + d
     if not 0 <= p < len(sections.PAGES) or state['busy']: return False

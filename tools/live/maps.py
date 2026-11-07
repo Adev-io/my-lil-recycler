@@ -15,6 +15,11 @@ ACID = {   # MiniLab "Synths" (Keys button): Acid Bass, plus the arp's gate (kno
     16: (S.ACID, 28, lambda v: float(round((v - 64) / 64 * 12)), 'transpose'),     # Acid TRANSPOSE: the arp follows it
     19: (S.ACID, 27, lambda v: 1.0 + round(v / 127 * 31), 'pattern length'),
 }
+ENV = {    # MiniLab "Acid Env" (User button): Acid Bass filter envelope on the faders, amp envelope on knobs 1-4, tone on knobs 5-8
+    82: (S.ACID, 8, lin, 'filter attack'), 83: (S.ACID, 4, lin, 'filter decay'), 85: (S.ACID, 9, lin, 'filter sustain'), 17: (S.ACID, 10, lin, 'filter release'),
+    74: (S.ACID, 11, lin, 'amp attack'), 71: (S.ACID, 12, lin, 'amp decay'), 76: (S.ACID, 13, lin, 'amp sustain'), 77: (S.ACID, 14, lin, 'amp release'),
+    93: (S.ACID, 3, lin, 'env mod'), 18: (S.ACID, 5, lin, 'accent'), 16: (S.ACID, 1, lin, 'cutoff'), 19: (S.ACID, 2, lin, 'resonance'),
+}
 ACID_TOLS = {(S.ACID, 28): 1.0, (S.ACID, 27): 1.0, (TRI, 28): 0.15}                       # pickup widths: stepped params within one step count as caught; Triple cutoff (log2 Hz) within 0.15
 TOP = 1.5                                                               # fader at the top = Recycler level 1.5 (max 2.0)
 fader = lambda v: round(v / 127 * TOP, 3)
@@ -42,6 +47,7 @@ MODES = {                                                               # pads =
     'mix': dict(title='Drums + mix', cc=MIX, pads=(S.DRUMS, 3, 0, 8), pad_label=lambda v: f'beat {v + 1}',
                 keys='My lil Drums volume · far left silent → far right full'),
 }
+MODES['env'] = dict(title='Acid Env', cc=ENV, pads=MODES['acid']['pads'], pad_label=acid_name, keys=MODES['acid']['keys'])   # pads + keys as Synths
 
 def to_cc(f, value):                                                    # Rack value -> the 0-127 position whose scale lands closest
     return min(range(128), key=lambda v: abs(f(v) - value))

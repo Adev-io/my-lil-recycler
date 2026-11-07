@@ -1,6 +1,6 @@
 # Presses every button on the virtual console (http://127.0.0.1:2700) through the page server, as a click would: both arrows,
-# every sample pad on every page, the bank button, every move in every bank, the drum machine button, both MiniLab mode
-# buttons, every labelled MiniLab knob / fader in both modes and every MiniLab pad. One PASS / FAIL line per button.
+# every sample pad on every page, the bank button, every move in every bank, the drum machine button, the three MiniLab mode
+# buttons, every labelled MiniLab knob / fader in every mode and every MiniLab pad. One PASS / FAIL line per button.
 # Saves the rig first (decks A/B/C, Arp, Acid, Mixer, Drums, tempo, page, bank, MiniLab mode) and puts it back at the end.
 # Audible while it runs (several minutes). Run with Rack + pads.py up, no move held: py -3.11 board_sweep.py
 import json, os, sys, time, urllib.request
@@ -139,7 +139,7 @@ try:
     check('drum machine button off / on', r1['on'] is False and a == (0.0, False) and r2['on'] is True and near(b[0], l0) and b[1] is True, f'{round(l0, 3)} -> {a} -> {b}')
 
     # ---- d) MiniLab mode buttons (each launches acid.py / minilab.py; with no MiniLab plugged in they exit, the page relabels anyway)
-    for m, f0 in (('acid', 'cutoff'), ('mix', 'vocals vol')):
+    for m, f0 in (('acid', 'cutoff'), ('env', 'filter attack'), ('mix', 'vocals vol')):
         r = post('/mode', {'mode': m}); time.sleep(3); g = get()['minilab']; fm = open(os.path.join(here, 'minilab.mode')).read().strip()
         check(f'mode button {m}', r['ok'] and fm == m and g['mode'] == m and g['title'] == maps.MODES[m]['title'] and g['faders'][0]['label'] == f0, f'file {fm} page {g["mode"]} fader 1 {g["faders"][0]["label"]}')
 
@@ -172,6 +172,9 @@ try:
         post('/set', {'pad': i}); a = (round(prm(S.ACID, 24)), get()['minilab']['pads'][i]['on'])
         check(f'MiniLab acid pad {i + 1} ({pd["label"]})', a == (8 + i, True), f'{a}')
     S.call('vcvrack_set_params', {'moduleId': S.ACID, 'params': [{'id': 24, 'value': p0}]})
+
+    # ---- e) Acid Env mode: filter / amp ADSR knobs and faders (pads + keys are the acid mode's)
+    post('/mode', {'mode': 'env'}); time.sleep(3); sweep_ccs('env', maps.ENV)
     post('/mode', {'mode': 'mix'}); time.sleep(3)
 except Exception:
     import traceback; traceback.print_exc(); check('sweep ran to the end', False)

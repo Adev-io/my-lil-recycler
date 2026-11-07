@@ -6,6 +6,8 @@
 # Faders: cutoff, resonance, env mod, decay.
 #   Knobs: 1 accent, 2 volume, 3 gate length, 4 arp gate, 5 high-pass, 6 arp brightness (Triple cutoff), 7 transpose -12..+12 (the arp follows),
 #   8 pattern length. Pickup: a control acts once it reaches Rack's value. Stop: acid.stop. Log: acid.log.
+# `py acid.py env` = Acid Env mode (maps.ENV): faders filter attack / decay / sustain / release, knobs 1-4 amp attack / decay /
+#   sustain / release, 5 env mod, 6 accent, 7 cutoff, 8 resonance. Keys and pads as above. Default (no arg) = acid (Synths).
 import os, sys, time, json, threading, traceback, mido
 here = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, here)
 LOG = open(os.path.join(here, 'acid.log'), 'a', buffering=1); sys.stderr = LOG
@@ -15,7 +17,8 @@ STOP, MLSTOP = os.path.join(here, 'acid.stop'), os.path.join(here, 'minilab.stop
 OCT, ACC_VEL, RESUME = -12, 100, 2.0
 TICK, REFRESH, TOL = 0.05, 1.0, 0.05
 import maps                                   # the map lives in maps.py (shared with the virtual controller page)
-MAP = dict(maps.ACID)                         # CC -> (module, param, scale, label): Acid Bass, the arp's gate, Triple's cutoff
+MODE = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in ('acid', 'env') else 'acid'   # acid = Synths, env = Acid Env
+MAP = dict(maps.MODES[MODE]['cc'])            # CC -> (module, param, scale, label)
 TOLS = maps.ACID_TOLS                         # (module, param) -> pickup tolerance
 pending, cur, prev, eng, held, lock = {}, {}, {}, set(), set(), threading.Lock()
 seq = {'off': False, 'release': 0.0}
@@ -90,11 +93,13 @@ for _ in range(20):
     except Exception: time.sleep(0.5)
 if os.path.exists(MLSTOP): os.remove(MLSTOP)
 if inp is None: log('MiniLab not available (still held by minilab.py?)'); sys.exit(1)
-open(os.path.join(here, 'minilab.mode'), 'w').write('acid')      # the page labels the MiniLab for this program
+open(os.path.join(here, 'minilab.mode'), 'w').write(MODE)        # the page labels the MiniLab for this program
 try: refresh()
 except Exception: LOG.write(traceback.format_exc())
 threading.Thread(target=loop, daemon=True).start()
-log('start: keys play the bass, pads = acid patterns, faders cutoff/res/env/decay, knobs incl. arp gate / brightness / transpose')
+log(f'start ({MODE}: {maps.MODES[MODE]["title"]}): keys play the bass, pads = acid patterns, '
+    + ('faders filter A/D/S/R, knobs amp A/D/S/R, env mod, accent, cutoff, resonance' if MODE == 'env'
+       else 'faders cutoff/res/env/decay, knobs incl. arp gate / brightness / transpose'))
 while not os.path.exists(STOP): time.sleep(0.25)
 inp.close()
 for n in list(held): out.send(mido.Message('note_off', note=n))

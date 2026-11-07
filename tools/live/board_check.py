@@ -7,6 +7,11 @@ for pg in S.PAGES:
 assert maps.pad_labels(S.ROWS_TOOM[71]['samples'])[:2] == ['05 verse', '02 verse']
 assert maps.pad_labels(S.ROWS[81]['samples']) == ['14 chop', '14'], maps.pad_labels(S.ROWS[81]['samples'])
 assert maps.pad_labels(S.ROWS[31]['samples'])[:3] == ['strings 08', 'strings 13', 'full 08']
+E = maps.MODES['env']                                                       # Acid Env (Launchpad User button): filter + amp ADSR
+assert set(E['cc']) == set(maps.KNOBS + maps.FADERS) and E['title'] == 'Acid Env', sorted(E['cc'])
+assert all(mod == S.ACID and pid in {1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, 14} for mod, pid, *_ in E['cc'].values()), E['cc']
+assert [E['cc'][c][1] for c in maps.FADERS] == [8, 4, 9, 10] and [E['cc'][c][1] for c in maps.KNOBS] == [11, 12, 13, 14, 3, 5, 1, 2]
+assert E['pads'] == maps.MODES['acid']['pads'] and E['keys'] == maps.MODES['acid']['keys'] and E['pad_label'] is maps.acid_name
 for mode, M in maps.MODES.items():
     assert set(M['cc']) <= set(maps.KNOBS + maps.FADERS), mode
     for cc, (mod, pid, f, label) in M['cc'].items():
