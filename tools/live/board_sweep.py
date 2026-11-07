@@ -1,14 +1,14 @@
 # Presses every button on the virtual console (http://127.0.0.1:2700) through the page server, as a click would: both arrows,
 # every sample pad on every page (every row page too: samples2 and the chop halves, through its row-end round button), the bank button, every move in every bank, the drum machine button, every Synths page pad,
 # the three MiniLab mode buttons, every labelled MiniLab knob / fader in every mode and every MiniLab pad. One PASS / FAIL line per button.
-# Saves the rig first (decks A/B/C, Arp, Acid, Mixer, Drums, tempo, page, bank, MiniLab mode) and puts it back at the end.
+# Saves the rig first (decks A/B/C/D, Arp, Acid, Mixer, Drums, tempo, page, bank, MiniLab mode) and puts it back at the end.
 # Audible while it runs (several minutes). Run with Rack + pads.py up, no move held: py -3.11 board_sweep.py
 import json, os, sys, time, urllib.request
 here = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, here)
 import sections as S, fx, maps, synths
 C, U, URL = fx.C, S.U, 'http://127.0.0.1:2700'
 LOGF, LEVELF = os.path.join(here, 'pads.log'), maps.LEVELF
-NAMES = {S.A: 'A', S.B: 'B', C: 'C', S.MIX: 'MIX', S.DRUMS: 'DRUMS', S.ACID: 'ACID', fx.CLOCK: 'CLOCK'}
+NAMES = {S.A: 'A', S.B: 'B', C: 'C', S.D: 'D', S.MIX: 'MIX', S.DRUMS: 'DRUMS', S.ACID: 'ACID', fx.CLOCK: 'CLOCK'}
 res = []
 def check(name, ok, info=''):
     res.append((name, bool(ok))); print(f"{'PASS' if ok else 'FAIL'}  {name}  {info}", flush=True)
@@ -37,14 +37,14 @@ def snap(): return {m: prms(m) for m in NAMES}                                  
 def put(sn):
     for m, p in sn.items():
         ps = [{'id': k, 'value': v} for k, v in p.items()]
-        S.call('vcvrack_set_params', {'moduleId': m, 'params': fx.no_stut(ps) if m in (S.A, S.B, C) else ps})   # Recycler STUT 40-44 left alone
+        S.call('vcvrack_set_params', {'moduleId': m, 'params': fx.no_stut(ps) if m in (S.A, S.B, C, S.D) else ps})   # Recycler STUT 40-44 left alone
 def diff(a, b, skip=()):                                                         # params that differ, as 'MIX[4] 0.707->0.0'
     return [f'{NAMES[m]}[{k}] {round(a[m][k], 3)}->{round(b[m][k], 3)}' for m in a for k in a[m]
             if (m, k) not in skip and abs(a[m][k] - b[m][k]) > 0.002]
 near = lambda a, b, tol=0.002: abs(a - b) <= tol
 
 # ---- save the rig
-saved = {d: json.loads(S.call('vcvrack_get_module_state', {'id': d})) for d in (S.A, S.B, C, synths.ARP, S.ACID)}
+saved = {d: json.loads(S.call('vcvrack_get_module_state', {'id': d})) for d in (S.A, S.B, C, S.D, synths.ARP, S.ACID)}
 saved_p = {m: prms(m) for m in (S.MIX, S.DRUMS, S.ACID, synths.TRI)}
 saved_strips, saved_bpm = fx.strips(), fx.bpm()
 saved_level = open(LEVELF).read() if os.path.exists(LEVELF) else None
@@ -61,7 +61,7 @@ try:
     check('left / right arrow turn the page', r1['ok'] and r2['ok'] and p1 == last - 1 and p2 == last, f'{p1 + 1} {p2 + 1}')
 
     # ---- a) every sample pad on every page: plays its sample in its deck slot, lit; again = muted
-    for d in (S.A, S.B, C): S.call('vcvrack_set_params', {'moduleId': d, 'params': [{'id': 14 + k, 'value': 0.0} for k in range(4)]})
+    for d in (S.A, S.B, C, S.D): S.call('vcvrack_set_params', {'moduleId': d, 'params': [{'id': 14 + k, 'value': 0.0} for k in range(4)]})
     time.sleep(6)                                                                # pads.py re-reads the rig: every row dark
     def row_pads(P, pg, row):                                                    # every pad of a row as shown (its row page)
         r = S.PAGES[pg]['rows'][row['base']]; deck, slot = r.get('deck', S.A), r['slot']; L = S.cur(r, row.get('rpage', 0))
@@ -104,8 +104,8 @@ try:
     TOG = {   # toggle move -> (seconds to let it work, the effect it must have while on: (before, during) -> bool)
         'sweep up':     (2.5, lambda b, d: d[S.A][24] > b[S.A][24] + 0.05),
         'sweep down':   (2.5, lambda b, d: d[S.A][24] < b[S.A][24] - 0.05),
-        'reverse':      (0, lambda b, d: all(d[S.A][36 + k] == 1.0 for k in range(4)) and all(d[S.B][36 + k] == 0.0 for k in range(4))),
-        'drums only':   (0, lambda b, d: all(d[S.MIX][k] == 0.0 for k in (1, 2, 3, 5, 6)) and d[S.MIX][0] == b[S.MIX][0] and d[S.MIX][4] == b[S.MIX][4]),
+        'reverse':      (0, lambda b, d: all(d[S.A][36 + k] == 1.0 for k in range(4)) and all(d[S.B][36 + k] == 0.0 and d[S.D][36 + k] == 0.0 for k in range(4))),
+        'drums only':   (0, lambda b, d: all(d[S.MIX][k] == 0.0 for k in (1, 2, 3, 5, 6, 7)) and d[S.MIX][0] == b[S.MIX][0] and d[S.MIX][4] == b[S.MIX][4]),
         'no drums':     (0, lambda b, d: d[S.MIX][0] == 0.0 and d[S.MIX][4] == 0.0 and d[S.MIX][2] == b[S.MIX][2]),
         'acid in/out':  (fx.bars_secs(2) + 1.5, lambda b, d: (b[S.MIX][1] > 0.001) != (d[S.MIX][1] > 0.001)),   # 2-bar entries
         'arp in/out':   (fx.bars_secs(2) + 1.5, lambda b, d: (b[S.MIX][6] > 0.001) != (d[S.MIX][6] > 0.001)),
@@ -136,12 +136,14 @@ try:
             elif name == 'transition':                                           # Lowdown on show: TOOM (deck B) sweeps out, Lowdown in
                 ok1 = press(note); on1 = fxon(name); time.sleep(fx.TRANS_SECS + 2.5); a, on2 = snap(), fxon(name)
                 check(f'bank {bk + 1} transition', ok1 and on1 and not on2 and logged(n0, 'transition to Lowdown done') and a[S.MIX][2] == U and a[S.MIX][3] == U
-                      and all(a[S.B][14 + k] == 0.0 for k in range(4)) and [round(a[S.A][24 + k], 2) for k in range(4)] == fx.BASEF[S.A], f'lit {on1}->{on2}')
+                      and a[S.MIX][7] == 0.0 and all(a[S.B][14 + k] == 0.0 and a[S.D][14 + k] == 0.0 for k in range(4))   # Disco (deck D) out too, strip 8 at rest 0
+                      and [round(a[S.A][24 + k], 2) for k in range(4)] == fx.BASEF[S.A], f'lit {on1}->{on2}')
             elif name == 'clean':                                                # a sweep up held, then clean: filters at rest, strips 3-5 open
                 press(11 if 11 in [x['note'] for x in get()['launchpad']['fx']] else note); time.sleep(2); d = snap()
                 ok = press(note); a = snap(); lit_any = [x['name'] for x in get()['launchpad']['fx'] if x['on'] and not x['name'].endswith('in/out')]
                 filt = [round(a[S.A][24 + k], 2) for k in range(4)] + [round(a[C][24], 2)] + [round(a[S.B][24 + k], 2) for k in range(4)]
-                check(f'bank {bk + 1} clean', ok and d[S.A][24] > b[S.A][24] + 0.05 and filt == fx.BASE and [a[S.MIX][k] for k in (2, 3, 4)] == [U, U, U] and not lit_any,
+                check(f'bank {bk + 1} clean', ok and d[S.A][24] > b[S.A][24] + 0.05 and filt == fx.BASE and [round(a[S.D][24 + k], 2) for k in range(4)] == fx.BASEF[S.D]
+                      and [a[S.MIX][k] for k in (2, 3, 4)] == [U, U, U] and not lit_any,
                       f'filters {filt} strips {[round(a[S.MIX][k], 3) for k in (2, 3, 4)]} lit {lit_any}')
             elif name == 'break fill':                                           # the break for 2 bars, then the beat before
                 ok1 = press(note); p1, on1 = round(prm(S.DRUMS, 3)) + 1, fxon(name); time.sleep(fx.bars_secs(2) + 1.5)
@@ -150,7 +152,7 @@ try:
                       f'pattern {round(b[S.DRUMS][3]) + 1} -> {p1} -> {p2}')
             elif name in fx.VOX_STUT:                                            # vox stutter (Recycler 2.4.0): a click holds the song on show's
                 VS = fx.STUT + fx.VOX_SLOT                                       # vocals at its length, a second click lets go; Lowdown, then TOOM
-                for pg, d, o in ((0, S.A, S.B), (1, S.B, S.A)):
+                for pg, d, o in ((0, S.A, S.B), (1, S.B, S.A), (2, S.D, S.A)):     # Disco: slot 3 = horns/synth (no vocals)
                     if len(b[d]) <= fx.STUTLEN: print(f'SKIP  bank {bk + 1} {name} page {pg + 1}  deck has {len(b[d])} params (Recycler before 2.4.0)', flush=True); continue
                     page(pg); ok1 = press(note); h = (prm(d, VS), prm(d, fx.STUTLEN), prm(o, VS), fxon(name))
                     ok2 = press(note); a = (prm(d, VS), fxon(name))
@@ -165,9 +167,9 @@ try:
     r2 = post('/machine'); b = (prm(S.DRUMS, 5), get()['launchpad']['machine'])
     check('drum machine button (top-row Session) off / on', r1['on'] is False and a == (0.0, False) and r2['on'] is True and near(b[0], l0) and b[1] is True, f'{round(l0, 3)} -> {a} -> {b}')
 
-    # ---- c2) every Synths pad (page 3). It acts on the song last shown: TOOM here (page 3 is reached through page 2).
+    # ---- c2) every Synths pad (page 4). It acts on the song last shown: Disco here (page 4 is reached through page 3).
     # Hold pads: a click holds, a second click lets go. Others: one click, its param checked. Auto / phrase: put back after.
-    page(1); page(len(L0['pages']) - 1); P = synths.pads(1)
+    page(1); page(len(L0['pages']) - 1); P = synths.pads(len(L0['pages']) - 2)
     rows3 = {r['base']: r for r in get()['launchpad']['rows']}
     AC, AR = (lambda i: prm(S.ACID, i)), (lambda i: prm(synths.ARP, i))
     phrase0 = next((31 + i for i in rlit(31) if i in (2, 3)), None)
@@ -253,7 +255,7 @@ finally:
     except Exception as e: print('Synths let go failed', e)
     post('/mode', {'mode': saved_mode}); bank(saved_bank); page(saved_page); time.sleep(2)   # page turn first: the arp scale write settles
     for d, s in saved.items():
-        if d in (S.A, S.B, C): s = dict(s, params=fx.no_stut(s['params']))   # Recycler decks: STUT 40-44 never restored (no hold left on)
+        if d in (S.A, S.B, C, S.D): s = dict(s, params=fx.no_stut(s['params']))   # Recycler decks: STUT 40-44 never restored (no hold left on)
         S.call('vcvrack_set_module_state', {'id': d, 'state': s})
     for m, p in saved_p.items(): S.call('vcvrack_set_params', {'moduleId': m, 'params': [{'id': k, 'value': v} for k, v in p.items()]})
     fx.set_strips(saved_strips); fx.bpm(saved_bpm)

@@ -1,5 +1,5 @@
 # Live end-to-end test of the set controls, driven through the page server (the same path as a click or a Launchpad press).
-# Saves the rig first (decks A/B/C, Arp, Acid, Mixer, Drums, Triple, tempo, page, bank, MiniLab mode) and puts it back at the end.
+# Saves the rig first (decks A/B/C/D, Arp, Acid, Mixer, Drums, Triple, tempo, page, bank, MiniLab mode) and puts it back at the end.
 # Audible while it runs (~6 min). Run with Rack + pads.py up: py -3.11 test_live.py
 import json, os, sys, time, urllib.request, urllib.error
 here = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, here)
@@ -38,7 +38,7 @@ near = lambda a, b, tol=0.002: abs(a - b) <= tol
 ENTRY_KNOB = {'acid in/out': fx.acid_cutoff, 'arp in/out': synths.arp_gate}               # what each 2-bar entry ramps, then puts back
 
 # ---- save the rig
-saved = {d: json.loads(S.call('vcvrack_get_module_state', {'id': d})) for d in (S.A, S.B, C)}
+saved = {d: json.loads(S.call('vcvrack_get_module_state', {'id': d})) for d in (S.A, S.B, C, S.D)}
 saved_vs = {m: json.loads(S.call('vcvrack_get_module_state', {'id': m})) for m in (synths.ARP, S.ACID)}   # arp dir + Acid patterns (keep writes one)
 saved_p = {m: {x['id']: x['value'] for x in json.loads(S.call('vcvrack_get_params', {'moduleId': m}))} for m in (S.MIX, S.DRUMS, S.ACID, synths.TRI)}
 g0 = get(); saved_page, saved_bank, saved_mode, saved_bpm = g0['launchpad']['page'], g0['launchpad']['bank'], g0['minilab']['mode'], fx.bpm()
@@ -46,12 +46,13 @@ saved_rp = None                                                  # Lowdown vocal
 print('saved rig: page', saved_page + 1, 'bank', saved_bank + 1, 'mode', saved_mode, 'bpm', saved_bpm, 'strips', st())
 try:
     # ---- baseline: every sample part muted, strips open, drum machine on, bank 1
-    for d in (S.A, S.B, C): S.call('vcvrack_set_params', {'moduleId': d, 'params': [{'id': 14 + k, 'value': 0.0} for k in range(4)]})
-    fx.set_strip_map({2: U, 3: U, 4: U}); maps.drum_machine(True); bank(0); page(0); time.sleep(6)
+    for d in (S.A, S.B, C, S.D): S.call('vcvrack_set_params', {'moduleId': d, 'params': [{'id': 14 + k, 'value': 0.0} for k in range(4)]})
+    fx.set_strip_map({2: U, 3: U, 4: U, 7: 0.0}); maps.drum_machine(True); bank(0); page(0); time.sleep(6)   # Disco's strip rests at 0
 
     check('page server answers, Rack up', g0['rack'])
     idle(); post('/page', {'dir': -1}); check('no page left of page 1', get()['launchpad']['page'] == 0)
     page(1); check('right arrow -> page 2 Time Out Of Mind', get()['launchpad']['page'] == 1)
+    page(2); check('right arrow -> page 3 Disco Ulysses', get()['launchpad']['page'] == 2 and get()['launchpad']['pages'][2:] == ['Disco Ulysses', 'Synths'])
     page(0)
     try: post('/press', {'note': 71}, origin='http://evil.example'); check('foreign site refused', False)
     except urllib.error.HTTPError as e: check('foreign site refused', e.code == 403, f'HTTP {e.code}')
@@ -69,6 +70,9 @@ try:
     check('drums slot shared: TOOM drums replace Lowdown drums', a.startswith('1-drums-15') and b.startswith('1-drums-05'), f'{a} -> {b}')
     page(0); check('Lowdown drums pad goes dark after the swap', lit('drums') is None)
     page(1); press(21); page(0)
+    page(2); press(71); a = (path(S.D, 1), lv(S.D)[1], lit('piano')); press(71)                 # Disco: deck D, strip 8 resting at 0 (cue)
+    check('Disco piano pad 1 plays 15 chorus on deck D, again mutes', a[0].startswith('4-piano-15') and a[1] == 1.0 and a[2] == 0 and lv(S.D)[1] == 0.0 and lit('piano') is None, f'{a}')
+    page(0)
 
     # ---- page follows the rig
     press(41); S.call('vcvrack_set_params', {'moduleId': S.A, 'params': [{'id': 14, 'value': 0.0}]}); time.sleep(6.5)
@@ -126,6 +130,11 @@ try:
     check('transition to TOOM: Lowdown out, TOOM pad 1 rows in', lv(S.A) == [0.0] * 4 and lv(S.B)[1] == 1.0 and lv(S.B)[0] == 1.0 and path(C, 0).startswith('1-drums-05') and st()[2] == U, f'A {lv(S.A)} B {lv(S.B)}')
     page(0); press(17); time.sleep(18)
     check('transition back: TOOM out, Lowdown pad 1 rows in', lv(S.B) == [0.0] * 4 and lv(S.A)[1] == 1.2 and lv(S.A)[0] == 1.0 and path(C, 0).startswith('1-drums-15'), f'A {lv(S.A)} B {lv(S.B)}')
+    page(2); press(17); time.sleep(18)
+    check('transition to Disco: Lowdown out, Disco pad 1 rows in, strip 8 up', lv(S.A) == [0.0] * 4 and lv(S.D)[1] == 1.0 and lv(S.D)[0] == 1.0 and path(C, 0).startswith('1-drums-08_chorus')
+          and st()[7] == U and st()[2] == U, f'A {lv(S.A)} D {lv(S.D)} strips {st()}')
+    page(0); press(17); time.sleep(18)
+    check('transition Disco -> Lowdown: Disco out, strip 8 back to 0', lv(S.D) == [0.0] * 4 and st()[7] == 0.0 and lv(S.A)[1] == 1.2 and path(C, 0).startswith('1-drums-15'), f'A {lv(S.A)} D {lv(S.D)} strips {st()}')
     press(11); time.sleep(2); press(18)
     check('clean: filters at rest, strips open', [round(x, 2) for x in fx.deck_filters(S.A)] == fx.BASEF[S.A] and st()[2:5] == [U, U, U] and not fxon('sweep up'))
 
@@ -160,16 +169,17 @@ try:
     bank(2); a = st()[4]; press(11); time.sleep(fx.bars_secs(fx.FADE_BARS) + 1); b = st()[4]; press(11); time.sleep(fx.bars_secs(fx.FADE_BARS) + 1)
     check('drums in/out fades tracked drums out and back', a > 0.5 and b == 0 and abs(st()[4] - a) < 0.01, f'{a} -> {b} -> {st()[4]}')
     VS = fx.STUT + fx.VOX_SLOT                                         # vox stutter (Recycler 2.4.0): a page click holds, again lets go
-    for pg, d, o in ((0, S.A, S.B), (1, S.B, S.A)):
+    for pg, d, o in ((0, S.A, S.B), (1, S.B, S.A), (2, S.D, S.A)):          # Disco: slot 3 = horns/synth (no vocals)
         n = len(json.loads(S.call('vcvrack_get_params', {'moduleId': d})))
         if n <= fx.STUTLEN: print(f'SKIP  vox 1/8 on page {pg + 1}  deck has {n} params (Recycler before 2.4.0)', flush=True); continue
         page(pg); press(13); a = (prm(d, VS), prm(d, fx.STUTLEN), prm(o, VS), fxon('vox 1/8')); press(13); b = (prm(d, VS), fxon('vox 1/8'))
         check(f'vox 1/8 on page {pg + 1} holds its vocals stutter at 1/8, click again lets go', a == (1.0, 1.0, 0.0, True) and b == (0.0, False), f'held {a} let go {b}')
     page(0); bank(0)
 
-    # ---- Synths page (page 3): it acts on the song last shown, here TOOM (page 3 is reached through page 2)
-    page(1); page(2); names = [r['name'] for r in get()['launchpad']['rows']]
-    check('Synths page rows', get()['launchpad']['page'] == 2 and names == ['acid patterns', 'acid moves', 'fills (hold)', 'arp dir / oct', 'arp interval', 'auto change'], f'{names}')
+    # ---- Synths page (page 4): it acts on the song last shown, here Disco (page 4 is reached through page 3)
+    page(1); page(3); names = [r['name'] for r in get()['launchpad']['rows']]; time.sleep(1)
+    check('Synths page rows', get()['launchpad']['page'] == 3 and names == ['acid patterns', 'acid moves', 'fills (hold)', 'arp dir / oct', 'arp interval', 'auto change'], f'{names}')
+    check('arp scale follows Disco: B major (mask 3418)', synths.scale_now() == 3418, f'{synths.scale_now()}')
     AC, AR = (lambda i: prm(S.ACID, i)), (lambda i: prm(synths.ARP, i))
     press(76); a = AC(28); press(75); b = AC(28)
     check('tr +5 then tr 0 transpose the Acid', a == 5 and b == 0, f'{a} {b}')
@@ -187,11 +197,11 @@ try:
     check('arp x2: click holds roll 2, click again lets go', a == (1.0, 2.0) and b == 0.0, f'{a} {b}')
     press(31); a = 0 in row('auto change')['lit']; press(31); b = 0 in row('auto change')['lit']
     check('auto acid on (lit) / off', a and not b, f'{a} {b}')
-    press(82); check('acid patterns pad 2 = TOOM pattern 2', AC(24) == S.ACID_SONG[1][1] and 1 in row('acid patterns')['lit'], f'{AC(24)} want {S.ACID_SONG[1][1]}')
-    press(11); time.sleep(4); fa, fb = fx.deck_filters(S.A), fx.deck_filters(S.B); press(11)
-    check('sweep up on the Synths page moves TOOM (deck B) only', fb[0] > 0.2 and [round(x, 2) for x in fa] == fx.BASEF[S.A] and [round(x, 2) for x in fx.deck_filters(S.B)] == fx.BASEF[S.B],
-          f'A {[round(x, 2) for x in fa]} B {[round(x, 2) for x in fb]}')
-    page(0)
+    press(82); check('acid patterns pad 2 = Disco pattern 2', AC(24) == S.ACID_SONG[2][1] and 1 in row('acid patterns')['lit'], f'{AC(24)} want {S.ACID_SONG[2][1]}')
+    press(11); time.sleep(4); fa, fd = fx.deck_filters(S.A), fx.deck_filters(S.D); press(11)
+    check('sweep up on the Synths page moves Disco (deck D) only', fd[0] > 0.2 and [round(x, 2) for x in fa] == fx.BASEF[S.A] and [round(x, 2) for x in fx.deck_filters(S.D)] == fx.BASEF[S.D],
+          f'A {[round(x, 2) for x in fa]} D {[round(x, 2) for x in fd]}')
+    page(0); time.sleep(1); check('arp scale back to D major on Lowdown (mask 2774)', synths.scale_now() == 2774, f'{synths.scale_now()}')
 
     # ---- drums
     l0 = prm(S.DRUMS, 5); r1 = post('/machine'); r2 = post('/machine')
@@ -204,7 +214,7 @@ try:
     check('beat pads: pick, same again = off, any = on', a == (tp + 1, True) and b is False and c == (p0, True), f'{a} {b} {c}')
 
     # ---- MiniLab follows the song on show
-    for pg, d, nm in ((0, S.A, 'keys vol'), (1, S.B, 'piano vol')):
+    for pg, d, nm in ((0, S.A, 'keys vol'), (1, S.B, 'piano vol'), (2, S.D, 'piano vol')):
         page(pg); time.sleep(0.5); v0 = prm(d, 15); lab = get()['minilab']['faders'][1]['label']
         post('/set', {'cc': 83, 'value': 64}); v1 = prm(d, 15); post('/set', {'cc': 83, 'value': maps.to_cc(maps.fader, v0)})
         check(f'MiniLab fader 2 on page {pg + 1} = {nm}', lab == nm and abs(v1 - maps.fader(64)) < 0.01, f'{round(v0, 2)} -> {round(v1, 2)}')
@@ -220,7 +230,7 @@ finally:
     try: bank(0); press(18)                                    # clean: pads.py lets go of any move the test left held
     except Exception as e: print('clean failed', e)
     try:                                                       # Synths page: let go of a held fill, auto change off
-        page(2)
+        page(3)
         for name, keep in (('fills (hold)', ()), ('auto change', (2, 3))):   # auto change pads 3-4 = phrase length, lit by design
             for i in row(name)['lit']:
                 if i not in keep: press(row(name)['base'] + i)

@@ -108,18 +108,38 @@ ROWS_TOOM = {
     31: dict(name='solo',   slot=2, level=1.0, color=5,  deck=B, samples=Q('guitar', '08', '09', '10', '14')),
     21: dict(name='drums',  slot=0, level=1.0, color=13, deck=ROWS[21]['deck'], samples=Q('drums', '05', '02', '03', '06', '04', '07', '08', '15')),   # 16 outro near silent
 }
-PAGES = [dict(name='Lowdown', rows=ROWS), dict(name='Time Out Of Mind', rows=ROWS_TOOM)]
+# 2026-11-06 page 3: Vulfpeck "Disco Ulysses" on deck D (disco-crate, 134 BPM loops on the record's kick, key B major; deckd_add.py).
+# Deck D slots: 0 bass, 1 piano, 2 guitar, 3 other (horns/synth, bridge 11-12 only). No vocals: the top row is the horns/synth slot.
+# Drums row = the Disco drum stem in deck C's slot 0, shared with the Lowdown and TOOM drums rows (as page 2 does it).
+# Deck D's strip (Mixer strip 8, index 7) rests at 0: a page 3 pad cues its row silently, the moves row 'transition' fades it in.
+D = json.load(open(os.path.join(here, 'deckd.json')))['D']
+CRD = r'C:\Users\Arikl\Desktop\uvr-loops\crates\disco-crate'
+QD = lambda stem, *nn: [CRD.replace('\\', '/') + '/' + next(f for f in os.listdir(CRD) if re.match(rf'\d-{stem}-{n}_', f)) for n in nn]
+ROWS_DISCO = {
+    81: dict(name='horns/synth', slot=3, level=1.0, color=9, deck=D, samples=QD('other', '11', '12')),   # the 'other' stem plays only in the bridge
+    71: dict(name='piano',  slot=1, level=1.0, color=45, deck=D, samples=QD('piano', '15', '13', '14', '08', '06', '05', '02', '12')),    # choruses, verses, bridge
+    51: dict(name='guitar', slot=2, level=1.0, color=21, deck=D, samples=QD('guitar', '14', '15', '13', '08', '02', '05', '06', '12')),
+    41: dict(name='bass',   slot=0, level=1.0, color=37, deck=D, samples=QD('bass', '08', '13', '03', '05', '06', '02', '07', '15')),     # 07 = the break
+    21: dict(name='drums',  slot=0, level=1.0, color=13, deck=ROWS[21]['deck'], samples=QD('drums', '08', '13', '05', '06', '03', '14', '09', '10')),   # 09-10 break: half-time kicks
+}
+PAGES = [dict(name='Lowdown', rows=ROWS, deck=A), dict(name='Time Out Of Mind', rows=ROWS_TOOM, deck=B), dict(name='Disco Ulysses', rows=ROWS_DISCO, deck=D)]   # deck = the song's own deck
 # Arp keys per song page (pitch classes, C = 0). scale_scan.py 2026-11-06: both songs' bass sits in D major (D E F# G A B C#).
-SCALES = {0: (1, 2, 4, 6, 7, 9, 11), 1: (1, 2, 4, 6, 7, 9, 11)}
+# Disco Ulysses: B major (B C# D# E F# G# A#, mask 3418; the crate's pin, key 11). If A# rubs: (1, 3, 4, 6, 8, 11) = mask 2394.
+SCALES = {0: (1, 2, 4, 6, 7, 9, 11), 1: (1, 2, 4, 6, 7, 9, 11), 2: (1, 3, 4, 6, 8, 10, 11)}
 # Acid patterns per song for the Synths page row 8 and phrase auto-change. acid_slots.py 2026-11-06: 8, 9, 15, 16, 19 sit inside
 # the arp scale; 11, 12, 13, 17, 18 fall outside it and are dropped. The vamps stay first though outside too (10 has G# + A#,
 # 14 has A#: chromatic passing notes against D major).
-ACID_SONG = {0: [10, 8, 9], 1: [14, 15, 16, 19]}
-PAGES.append(dict(name='Synths', rows={}, synth=True))   # page 3: arp + acid controls (synths.py); moves act on the song last shown
+# Disco (2026-11-06, all 32 slots read against B major at TRANSPOSE 0; no page turn changes TRANSPOSE): 25 (starts on B: B C# E F# G#)
+# and 12 (F#/B pump) sit inside B major; 2 (E D F# B, starts on E like the record's bar 1) and 22 (C# D F# B) add only D natural,
+# the blue note of the record's own verse riff. No vamp for this song: the tonic pattern goes first.
+ACID_SONG = {0: [10, 8, 9], 1: [14, 15, 16, 19], 2: [25, 12, 2, 22]}
+PAGES.append(dict(name='Synths', rows={}, synth=True))   # page 4: arp + acid controls (synths.py); moves act on the song last shown
 def base(strips=True):                                         # deck A + deck B strips; deck A slots without a row silent (strips=False: mixer strips untouched, a crash respawn)
     mix = {p['id']: p['value'] for p in json.loads(call('vcvrack_get_params', {'moduleId': MIX}))}
     if mix[3] < 0.05:                                          # deck B was closed: its page starts silent, then the strip opens
         call('vcvrack_set_params', {'moduleId': B, 'params': [{'id': 14 + k, 'value': 0.0} for k in range(4)]})
+    if mix[7] < 0.05:                                          # deck D (Disco) closed: its slots silent; its strip stays where it is
+        call('vcvrack_set_params', {'moduleId': D, 'params': [{'id': 14 + k, 'value': 0.0} for k in range(4)]})   # (rests at 0: transition opens it)
     if strips: call('vcvrack_set_params', {'moduleId': MIX, 'params': [{'id': k, 'value': v} for k, v in enumerate((0.0, 0.0, U, U))] + [{'id': 40 + k, 'value': 0} for k in range(4)]})
     rows = {r['slot'] for r in ROWS.values()}
     call('vcvrack_set_params', {'moduleId': A, 'params': [{'id': 14 + k, 'value': 0.0} for k in range(4) if k not in rows]})

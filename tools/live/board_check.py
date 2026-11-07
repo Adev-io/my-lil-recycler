@@ -4,7 +4,9 @@ for pg in S.PAGES:
     for b, r in sorted(pg['rows'].items(), reverse=True):
         l = maps.pad_labels(r['samples']); assert len(l) == len(r['samples']) and all(l), (r['name'], l); print(f'{pg["name"][:7]} {r["name"]:12s}', l)
         assert all(b + i <= b + 7 for i in range(len(l))), (r['name'], 'more than 8 pads')
-assert S.PAGES[2]['synth'] and not S.PAGES[2]['rows'] and S.PAGES[2]['name'] == 'Synths', S.PAGES[2]   # page 3: Synths, no sample rows
+assert [p['name'] for p in S.PAGES] == ['Lowdown', 'Time Out Of Mind', 'Disco Ulysses', 'Synths'], [p['name'] for p in S.PAGES]   # Disco = page 3
+assert S.PAGES[3]['synth'] and not S.PAGES[3]['rows'] and [k for k, p in enumerate(S.PAGES) if p.get('synth')] == [3], S.PAGES[3]   # page 4: Synths, no sample rows
+assert [p.get('deck') for p in S.PAGES[:3]] == [S.A, S.B, S.D] and S.D not in (S.A, S.B, S.ACID, S.MIX, S.DRUMS), S.D   # each song page names its own deck
 assert maps.pad_labels(S.ROWS_TOOM[71]['samples'])[:2] == ['05 verse', '02 verse']
 assert maps.pad_labels(S.ROWS[81]['samples'])[:2] == ['14 chop', '14'], maps.pad_labels(S.ROWS[81]['samples'])   # Ari's two pads stay first
 import os
@@ -25,8 +27,8 @@ m0, m1 = maps.mix_map(0), maps.mix_map(1)                                   # dr
 assert m0[83][:2] == (S.A, 15) and m0[83][3] == 'keys vol' and m1[83][:2] == (S.B, 15) and m1[83][3] == 'piano vol', (m0[83], m1[83])
 assert m0[16] == m1[16] and m0[18] == m1[18] and m0[16][0] == S.DRUMS                     # drums the same on both songs
 import synths                                                               # arp scale per song page (2026-11-06 arp + acid)
-assert set(S.SCALES) == {0, 1} and all(len(set(p)) == 7 and all(0 <= c < 12 for c in p) for p in S.SCALES.values()), S.SCALES
-assert synths.mask_of((1, 2, 4, 6, 7, 9, 11)) == 2774
+assert set(S.SCALES) == {0, 1, 2} and all(len(set(p)) == 7 and all(0 <= c < 12 for c in p) for p in S.SCALES.values()), S.SCALES
+assert synths.mask_of((1, 2, 4, 6, 7, 9, 11)) == 2774 and synths.mask_of(S.SCALES[2]) == 3418, synths.mask_of(S.SCALES[2])   # Disco: B major
 import json
 calls, real_call = [], synths.S.call                                        # set_scale writes the arp's module data only, never params, and only when needed
 def fake_arp(locked, mask):
@@ -39,14 +41,17 @@ try:
     assert s['data'] == {'dir': 2, 'gateOuts': True, 'passThrough': False, 'type': 3, 'locked': True, 'lockedMask': 2774}, s['data']
     calls.clear(); synths.S.call = fake_arp(True, 2774); assert synths.set_scale(0) == 2774 and synths.follow(lambda: 1) == 2774
     assert not [1 for n, a in calls if n == 'vcvrack_set_module_state'], calls
+    calls.clear(); assert synths.follow(lambda: 2) == 3418 and synths.set_scale(3) is None   # Disco page: B major written; Synths page 4: nothing
+    sets = [a for n, a in calls if n == 'vcvrack_set_module_state']; assert len(sets) == 1 and sets[0]['state']['data']['lockedMask'] == 3418, calls
 finally: synths.S.call = real_call
 assert maps.ACID[77][:2] == (synths.ARP, 19) and maps.ACID[18][:2] == (synths.TRI, 28) and maps.ACID[16][:2] == (S.ACID, 28), 'Synths map'
 assert maps.ACID[16][2](0) == -12.0 and maps.ACID[16][2](127) == 12.0 and maps.MODES['acid']['title'] == 'Synths'
-for song in (0, 1):                                                          # Synths page pads (phase 3)
+assert S.ACID_SONG[2] == [25, 12, 2, 22], S.ACID_SONG[2]                    # Disco: tonic pattern first (B major at TRANSPOSE 0)
+for song in (0, 1, 2):                                                       # Synths page pads (phase 3)
     P = synths.pads(song)
     assert all(n // 10 * 10 + 1 in synths.ROWS and 1 <= n % 10 <= 8 for n in P), sorted(P)
     assert all(l.isascii() and len(l) <= 12 for l, *_ in P.values()), [l for l, *_ in P.values()]
-    assert all(0 <= v <= 31 for v in S.ACID_SONG[song]) and S.ACID_SONG[song][0] == (10, 14)[song]
+    assert all(0 <= v <= 31 for v in S.ACID_SONG[song]) and S.ACID_SONG[song][0] == (10, 14, 25)[song]
     assert {k for _, k, _ in P.values()} == {'pattern', 'mutate', 'undo', 'keep', 'transpose', 'fill', 'roll', 'octjump', 'dir', 'oct', 'int', 'auto', 'phrase'}
 assert [k for _, k in synths.ACID_RULE] == ['mutate', 'next', 'undo'] and synths.ACID_RULE[-1][0] == 1.0
 assert set(synths.ENTRY) == {'acid in/out', 'arp in/out'}
@@ -277,7 +282,7 @@ try:
     rf(81); assert on[81] is None and st2['rowpage'][(0, 81)] == 1; rf(81); assert on[81] == 0
     n = len(played); assert not rf(71) and not rf(21) and len(played) == n   # rows without a page 2: nothing, never a sound
     st2['busy'] = True; assert not rf(81); st2['busy'] = False
-    st2['page'] = 1; assert not rf(81); st2['page'] = 2; assert not rf(81); st2['page'] = 0   # TOOM vocals has no page 2; Synths page: no rows
+    st2['page'] = 1; assert not rf(81); st2['page'] = 2; assert not rf(81); st2['page'] = 3; assert not rf(81); st2['page'] = 0   # TOOM vocals, Disco horns: no page 2; Synths page: no rows
     assert not [l for l in logs if 'Traceback' in l], logs
     vst = {'params': [{'id': 14 + k, 'value': 1.0 if k == 3 else 0.0} for k in range(4)], 'data': {'slots': [{'path': ''}] * 3 + [{'path': s2[2]}]}}
     S.call = lambda name, args=None: json.dumps(vst); ps = {}                 # sections.now with row pages: index in the list on show
@@ -377,4 +382,59 @@ PD['mido'].get_input_names = lambda: ['listed']; listed = FakePort('listed', boo
 PD['mido'].get_input_names = lambda: 1 / 0; blind = FakePort('listed'); PD['park_or_close'](blind)   # the lookup itself fails: parked, never closed on a guess
 assert blind.closes == 0 and blind in PD['_dead'] and blind.callback is None
 print('Dead port offline: a vanished port or a close that raises is parked in _dead, never closed again; a healthy port closes once')
+# ---- page 3 Disco Ulysses (deck D, disco-crate): rows, pins, labels, mix map, moves, base, transition in and out (rig stubbed)
+RD, U = S.ROWS_DISCO, S.U; LIBF = os.path.expandvars(r'%LOCALAPPDATA%\Rack2\MyLilRecycler\library.json')
+lib = {e['path']: e for e in json.load(open(LIBF, encoding='utf-8'))}
+assert {b: (r['name'], r['slot']) for b, r in RD.items()} == {81: ('horns/synth', 3), 71: ('piano', 1), 51: ('guitar', 2), 41: ('bass', 0), 21: ('drums', 0)}, RD
+assert all(r['deck'] == S.D for b, r in RD.items() if b != 21) and RD[21]['deck'] == S.ROWS[21]['deck'] == S.ROWS_TOOM[21]['deck'], 'Disco drums share deck C slot 0'
+assert [r['color'] for b, r in sorted(RD.items())] == [13, 37, 21, 45, 9] and all(b in RD for b in fx.FIRST), 'colours as pages 1-2; transition rows there'
+for b, r in sorted(RD.items(), reverse=True):
+    l = maps.pad_labels(r['samples']); assert 0 < len(r['samples']) <= 8 and len(set(l)) == len(l) and len(set(r['samples'])) == len(r['samples']), (r['name'], l)
+    for p in r['samples']:
+        e = lib.get(p); assert os.path.exists(p) and '/disco-crate/' in p and '_quiet' not in p, p
+        assert e and e['bars'] == 8 and e['key'] == 11 and not e['minor'] and e['size'] == os.path.getsize(p), (p, e and {k: e[k] for k in ('bars', 'key', 'minor')})
+    print(f'Disco   {r["name"]:12s}', l)
+assert maps.pad_labels(RD[71]['samples'])[:4] == ['15 chorus', '13 chorus', '14 chorus', '08 chorus'] and maps.pad_labels(RD[81]['samples']) == ['11 bridge', '12 bridge']
+m2 = maps.mix_map(2)                                                          # MiniLab drums + mix on the Disco page: deck D slots 3, 1, 2, 0
+assert [m2[c][:2] + (m2[c][3],) for c in maps.FADERS] == [(S.D, 17, 'horns/synth vol'), (S.D, 15, 'piano vol'), (S.D, 16, 'guitar vol'), (S.D, 14, 'bass vol')], m2
+assert m2[16] == m0[16] and m2[18] == m0[18] and [m2[c][1] for c in maps.KNOBS[:4]] == [27, 25, 26, 24]
+assert fx.own_deck(2) == S.D and fx.STRIP[S.D] == 7 and fx.BASEF[S.D] == [0.0] * 4 and fx.REST == {S.D: 0.0} and fx.own_deck(0) == S.A and fx.own_deck(1) == S.B
+assert fx.song_decks(2, [{}, {}, {21: 0}, {}]) == [S.D, fx.C] and fx.song_decks(2, [{}, {}, {}, {}]) == [S.D]
+HU = next(n for n in ast.parse(src_p).body if isinstance(n, ast.Assign) and getattr(n.targets[0], 'id', None) == 'HUSH')
+assert ast.literal_eval(HU.value) == {'drums only': (1, 2, 3, 5, 6, 7), 'no drums': (0, 4)}, ast.dump(HU.value)   # drums only silences deck D too
+sP = synths.pads(2); assert [sP[81 + i][2] for i in range(4)] == [25, 12, 2, 22] and 85 not in sP   # Synths acid row on Disco
+class Rig:                                                                    # decks / Mixer as params + slot paths; S.call answers from it
+    def __init__(s): s.p = {m: {i: 0.0 for i in range(48)} for m in (S.A, S.B, fx.C, S.D, S.MIX)}; s.path = {m: [''] * 4 for m in s.p}; s.sets = []
+    def __call__(s, name, a=None):
+        if name == 'vcvrack_get_params': return json.dumps([{'id': i, 'value': v} for i, v in s.p[a['moduleId']].items()])
+        if name == 'vcvrack_set_params':
+            s.sets.append(a)
+            for x in a['params']: s.p[a['moduleId']][x['id']] = x['value']
+            return '[]'
+        if name == 'vcvrack_get_module_state': return json.dumps({'params': [{'id': i, 'value': v} for i, v in s.p[a['id']].items()], 'data': {'slots': [{'path': x} for x in s.path[a['id']]]}})
+        if name == 'vcvrack_set_module_state': s.path[a['id']] = [x['path'] for x in a['state']['data']['slots']]; return '{}'
+        raise AssertionError(name)
+real_t = dict(call=S.call, TRANS_SECS=fx.TRANS_SECS, STEP=fx.STEP)
+try:
+    rig = Rig(); S.call = rig; rig.p[S.D].update({14: 0.8, 15: 0.8}); rig.p[S.MIX].update({2: U, 3: U, 4: U, 7: 0.0})
+    S.base(); assert all(rig.p[S.D][14 + k] == 0.0 for k in range(4)) and rig.p[S.MIX][7] == 0.0, rig.p[S.D]   # strip 7 closed: Disco slots silenced
+    assert all(x['id'] in (0, 1, 2, 3, 40, 41, 42, 43) for a in rig.sets if a['moduleId'] == S.MIX for x in a['params']), 'base never writes strip 7'
+    rig.p[S.MIX][7] = U; rig.p[S.D][15] = 1.0; S.base(); assert rig.p[S.D][15] == 1.0, 'Disco open: base leaves its rows playing'
+    rig = Rig(); S.call = rig; fx.TRANS_SECS, fx.STEP = 0.05, 0.005
+    K = S.ROWS[71]; rig.path[S.A][1] = K['samples'][0]; rig.p[S.A][15] = K['level']; rig.p[S.MIX].update({2: U, 3: U, 4: U, 7: 0.0})   # Lowdown keys playing
+    rig.p[S.A].update({24 + k: v for k, v in enumerate(fx.BASEF[S.A])}); on = [{71: 0}, {}, {}, {}]
+    assert fx.transition(2, on, lambda: True) is True                         # to Disco: silent, so pad 1 of piano, bass, drums comes in
+    assert rig.path[S.D][1] == RD[71]['samples'][0] and rig.path[S.D][0] == RD[41]['samples'][0] and rig.path[fx.C][0] == RD[21]['samples'][0], rig.path
+    assert (rig.p[S.D][15], rig.p[S.D][14], rig.p[fx.C][14]) == (1.0, 1.0, 1.0) and rig.p[S.MIX][7] == U and on[2] == {71: 0, 41: 0, 21: 0}, (rig.p[S.MIX][7], on)
+    assert all(rig.p[S.A][14 + k] == 0.0 for k in range(4)) and on[0][71] is None and rig.p[S.MIX][2] == U and rig.p[S.MIX][3] == U, 'Lowdown out, its strip ready at unity'
+    assert [rig.p[S.A][24 + k] for k in range(4)] == fx.BASEF[S.A] and rig.p[S.MIX][4] == U, 'filters back at rest; drums strip kept'
+    assert fx.transition(0, on, lambda: True) is True                         # back to Lowdown: Disco out, its strip rests at 0 again
+    assert all(rig.p[S.D][14 + k] == 0.0 for k in range(4)) and rig.p[S.MIX][7] == 0.0 and rig.p[S.MIX][2] == U, (rig.p[S.D], rig.p[S.MIX][7])
+    assert on[2][71] is None and on[2][41] is None and [on[0][b] for b in fx.FIRST] == [0, 0, 0] and rig.path[fx.C][0] == S.ROWS[21]['samples'][0], on
+    rig.sets.clear(); fx.clean(); assert rig.p[S.MIX][7] == 0.0 and not any(x['id'] == 7 for a in rig.sets if a['moduleId'] == S.MIX for x in a['params'])
+    assert any(a['moduleId'] == S.D and {x['id'] for x in a['params']} == {36, 37, 38, 39} for a in rig.sets), 'clean un-reverses deck D'
+finally: S.call, fx.TRANS_SECS, fx.STEP = real_t['call'], real_t['TRANS_SECS'], real_t['STEP']
+print('Disco offline: page 3 rows on deck D (+ shared drums slot), files in disco-crate pinned bars 8 key B major, labels unique, mix map = deck D, own deck / strip 7 /'
+      ' rest 0, drums only hushes strip 7, Synths acid row [25, 12, 2, 22], scale 3418, base silences Disco slots when strip 7 is closed and never opens it,'
+      ' transition in (pad 1 rows, strip 7 to unity, Lowdown out) and out (strip 7 back to 0), clean leaves strip 7, un-reverses deck D')
 print('ok')

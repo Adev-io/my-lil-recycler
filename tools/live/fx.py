@@ -14,32 +14,34 @@ def set_filters(v):                    # v = 9 values in BASE order
     S.call('vcvrack_set_params', {'moduleId': S.A, 'params': [{'id': 24 + k, 'value': v[k]} for k in range(4)]})
     S.call('vcvrack_set_params', {'moduleId': C, 'params': [{'id': 24, 'value': v[4]}]})
     S.call('vcvrack_set_params', {'moduleId': S.B, 'params': [{'id': 24 + k, 'value': v[5 + k]} for k in range(4)]})
-def reverse(on, decks=None):          # music decks only (reversed drums lose the groove); default both, the moves row passes one
-    for deck in (decks or (S.A, S.B)): S.call('vcvrack_set_params', {'moduleId': deck, 'params': [{'id': 36 + k, 'value': 1.0 if on else 0.0} for k in range(4)]})
-def strip(k, on):                      # Mixer strip k (2 = deck A music, 3 = deck B music, 4 = deck C drums): unity or silent
+def reverse(on, decks=None):          # music decks only (reversed drums lose the groove); default all three songs, the moves row passes one
+    for deck in (decks or (S.A, S.B, S.D)): S.call('vcvrack_set_params', {'moduleId': deck, 'params': [{'id': 36 + k, 'value': 1.0 if on else 0.0} for k in range(4)]})
+def strip(k, on):                      # Mixer strip k (2 = deck A music, 3 = deck B music, 4 = deck C drums, 7 = deck D music): unity or silent
     S.call('vcvrack_set_params', {'moduleId': S.MIX, 'params': [{'id': k, 'value': S.U if on else 0.0}]})
 def clean():
-    set_filters(BASE); reverse(False); strip(2, True); strip(3, True); strip(4, True)
+    set_filters(BASE); set_deck_filters(S.D, BASEF[S.D]); reverse(False); strip(2, True); strip(3, True); strip(4, True)   # deck D's strip: left as is (rests at 0)
 
 # Per song (2026-11-06, Ari: "sweep is only for samples ... a sweep up and down for each [song]" + "a transition from one song
-# to another"). A song = its own deck (page 1 Lowdown = A, page 2 Time Out Of Mind = B) + deck C while its drums row plays.
-STRIP = {S.A: 2, S.B: 3, C: 4}                                     # Mixer strip per deck
-BASEF = {S.A: BASE[0:4], C: BASE[4:5], S.B: BASE[5:9]}             # resting filters per deck (deck C: its drums slot only)
+# to another"). A song = its own deck (page 1 Lowdown = A, page 2 Time Out Of Mind = B, page 3 Disco Ulysses = D, sections.PAGES
+# 'deck') + deck C while its drums row plays.
+STRIP = {S.A: 2, S.B: 3, C: 4, S.D: 7}                             # Mixer strip per deck
+BASEF = {S.A: BASE[0:4], C: BASE[4:5], S.B: BASE[5:9], S.D: [0.0] * 4}   # resting filters per deck (deck C: its drums slot only)
+REST = {S.D: 0.0}                                                  # strip level a deck rests at after a transition out (else unity)
 TRANS_SECS = 16.0                                                  # 8 bars at 120: the loops a transition brings in land inside it
 FIRST = (71, 41, 21)                                               # silent song on show: a transition brings in pad 1 of these rows
 def song_decks(page, on):
-    return [S.A if page == 0 else S.B] + ([C] if on[page].get(21) is not None else [])
+    return [own_deck(page)] + ([C] if on[page].get(21) is not None else [])
 def deck_filters(d): return [p['value'] for p in json.loads(S.call('vcvrack_get_params', {'moduleId': d})) if 24 <= p['id'] < 24 + len(BASEF[d])]
 def set_deck_filters(d, v): S.call('vcvrack_set_params', {'moduleId': d, 'params': [{'id': 24 + k, 'value': x} for k, x in enumerate(v)]})
-def transition(page, on, alive):   # the song not on show sweeps up + fades out; the song on show fades in. Returns False if cut off.
-    rows, other = S.PAGES[page]['rows'], 1 - page
-    own = S.A if page == 0 else S.B; mix = strips()
+def transition(page, on, alive):   # the songs not on show sweep up + fade out; the song on show fades in. Returns False if cut off.
+    rows, others = S.PAGES[page]['rows'], [k for k, p in enumerate(S.PAGES) if p['rows'] and k != page]
+    own = own_deck(page); mix = strips()
     ps = {}; S.now(rows, None, ps)
     if not any(ps.values()):                                       # nothing of it playing on any row page (asked of the rig): bring in its verse pads
         for b in FIRST:
             r = rows[b]; S.play(r['slot'], r['samples'][0], r['level'], r.get('deck')); on[page][b] = 0
         S.call('vcvrack_set_params', {'moduleId': S.MIX, 'params': [{'id': STRIP[own], 'value': 0.0}]}); mix[STRIP[own]] = 0.0
-    inn = song_decks(page, on); out = [d for d in song_decks(other, on) if d not in inn]
+    inn = song_decks(page, on); out = list(dict.fromkeys(d for k in others for d in song_decks(k, on) if d not in inn))
     f0 = {d: deck_filters(d) for d in inn + out}; t0 = time.time()
     while True:
         if not alive(): return False
@@ -50,11 +52,12 @@ def transition(page, on, alive):   # the song not on show sweeps up + fades out;
                                       + [{'id': STRIP[d], 'value': mix[STRIP[d]] + (S.U - mix[STRIP[d]]) * e} for d in inn]})
         if x >= 1.0: break
         time.sleep(STEP)
-    for b, r in S.PAGES[other]['rows'].items():                   # the old song's pads go dark with it
-        if r.get('deck', S.A) in out: on[other][b] = None
-    for d in out:                                                  # the old song's rows stop; its deck is ready for next time
+    for k in others:                                               # the old songs' pads go dark with them
+        for b, r in S.PAGES[k]['rows'].items():
+            if r.get('deck', S.A) in out: on[k][b] = None
+    for d in out:                                                  # the old songs' rows stop; each deck is ready for next time
         S.call('vcvrack_set_params', {'moduleId': d, 'params': [{'id': 14 + k, 'value': 0.0} for k in range(len(BASEF[d]))]})
-        set_deck_filters(d, BASEF[d]); S.call('vcvrack_set_params', {'moduleId': S.MIX, 'params': [{'id': STRIP[d], 'value': S.U}]})
+        set_deck_filters(d, BASEF[d]); S.call('vcvrack_set_params', {'moduleId': S.MIX, 'params': [{'id': STRIP[d], 'value': REST.get(d, S.U)}]})
     return True
 
 # Pad 16 'dnb' = drum + bass section: My lil Drums + Acid Bass only, tempo on an ADSR. Press: attack from the set's tempo -> peak, decay -> sustain,
@@ -63,7 +66,7 @@ import time
 CLOCK = json.load(open(os.path.join(S.here, 'clock.json')))['CLOCK']
 BPM = 120.0
 DNB = dict(attack=8.0, decay=0.0, peak=140.0, sustain=140.0, release=8.0)   # seconds / BPM
-DNB_KEEP = (0, 1)                      # Mixer strips kept: 0 My lil Drums, 1 Acid Bass. Deck A, B, C and Acid Voice fade out.
+DNB_KEEP = (0, 1)                      # Mixer strips kept: 0 My lil Drums, 1 Acid Bass. Decks A, B, C, D, Acid Voice and Triple fade out.
 def bpm(v=None):
     if v is None: return next(p['value'] for p in json.loads(S.call('vcvrack_get_params', {'moduleId': CLOCK})) if p['id'] == 0)
     S.call('vcvrack_set_params', {'moduleId': CLOCK, 'params': [{'id': 0, 'value': round(v, 2)}]})
@@ -101,9 +104,9 @@ BANKS = [FX, FX2, FX3]
 FADE_BARS = 4                                                      # drums in/out: the record's drum stem (deck C strip) fades over 4 bars
 BANK_CC = 19                                                       # right column, bottom round button (end of the moves row)
 STRIP_TOGGLE = {'acid in/out': (1, S.U), 'arp in/out': (6, 0.5), 'voice in/out': (5, 0.3)}   # Mixer strip, level if none was saved
-SLOT_TOGGLE = {'no bass': 0, 'no vocals': 3}                       # deck slot of the song on show (both decks: 0 bass, 3 vocals)
+SLOT_TOGGLE = {'no bass': 0, 'no vocals': 3}                       # deck slot of the song on show (0 bass, 3 vocals; Disco: 3 = horns/synth)
 BREAKDOWN_LP = -0.6                                                # breakdown: the song on show low-passed, drums out
-own_deck = lambda page: S.A if page == 0 else S.B
+own_deck = lambda page: S.PAGES[page]['deck']                     # the song page's own deck: A Lowdown, B TOOM, D Disco
 def slot_level(d, k, v=None):
     if v is None: return next(p['value'] for p in json.loads(S.call('vcvrack_get_params', {'moduleId': d})) if p['id'] == 14 + k)
     S.call('vcvrack_set_params', {'moduleId': d, 'params': [{'id': 14 + k, 'value': v}]})
@@ -115,6 +118,7 @@ def bars_secs(n): return n * 4 * 60.0 / bpm()
 # Bank 3 vox stutter (2026-11-06, Recycler 2.4.0 STUT, docs/superpowers/specs/2026-11-06-recycler-stutter-design.md): hold pads on the
 # vocals slot of the song on show. state['vox'] = {note: (deck, name, hw)} in press order; pads.py calls these under HOLDL.
 STUT, STUTLEN, VOX_SLOT = 40, 44, 3                                # STUT_PARAM 40-43 (hold per slot), STUTLEN_PARAM 44 (0 = 1/4 bar .. 3 = 1/32)
+                                                                   # Disco has no vocals: slot 3 there = horns/synth, so vox pads stutter the horns
 VOX_STUT = {'vox 1/4': 0, 'vox 1/8': 1, 'vox 1/16': 2, 'vox 1/32': 3}
 def vox_stut(deck, div):                                           # div None = let go; else length + hold in one call
     S.call('vcvrack_set_params', {'moduleId': deck, 'params': [{'id': STUT + VOX_SLOT, 'value': 0.0}] if div is None else

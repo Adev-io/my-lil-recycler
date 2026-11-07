@@ -13,7 +13,7 @@ def arp_data(**kv):                          # read-modify-write of the arp's mo
         st = json.loads(S.call('vcvrack_get_module_state', {'id': ARP})); st['data'].update(kv)
         st.pop('params', None)               # params stay as Rack has them now (checked live 2026-11-06: a state without 'params' leaves OCT and the keys alone)
         S.call('vcvrack_set_module_state', {'id': ARP, 'state': st}); return st['data']
-def set_scale(page):                         # page 0 Lowdown, 1 Time Out Of Mind; any other page keeps the scale playing
+def set_scale(page):                         # page 0 Lowdown, 1 Time Out Of Mind, 2 Disco Ulysses; any other page keeps the scale playing
     if page not in S.SCALES: return None
     m = mask_of(S.SCALES[page])
     with ARP_LOCK:
@@ -27,7 +27,7 @@ def scale_now():
     d = json.loads(S.call('vcvrack_get_module_state', {'id': ARP}))['data']
     return d.get('lockedMask') if d.get('locked') else None
 
-# ---- phase 3: the Synths page (Launchpad page 3), phrase auto-change, melodic entries
+# ---- phase 3: the Synths page (Launchpad page 4 since Disco Ulysses took page 3), phrase auto-change, melodic entries
 import random, time
 import fx                                    # fx imports sections only, so no cycle
 A_TRANSPOSE, A_MUTATE, A_AMOUNT, A_UNDO, A_KEEP, A_FILL, A_FILLBTN = range(28, 35)   # Acid Bass 2.3.0 params (appended)

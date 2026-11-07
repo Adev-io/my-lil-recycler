@@ -24,14 +24,14 @@ ACID_TOLS = {(S.ACID, 28): 1.0, (S.ACID, 27): 1.0, (TRI, 28): 0.15}             
 TOP = 1.5                                                               # fader at the top = Recycler level 1.5 (max 2.0)
 fader = lambda v: round(v / 127 * TOP, 3)
 knob = lambda v: round(max(-1.0, min(1.0, (v - 64) / 63)), 3)           # filter: centre off, left low-pass, right high-pass
-PAGEF = os.path.join(S.here, 'page.txt')                               # the Launchpad page on show (pads.py writes it): 0 Lowdown, 1 TOOM
+PAGEF = os.path.join(S.here, 'page.txt')                               # the song on show (pads.py writes it): 0 Lowdown, 1 TOOM, 2 Disco
 def page_now():
     try: return int(open(PAGEF).read().strip())
     except (OSError, ValueError): return 0
-SONG_PARTS = [('vocals', 'keys', 'horns', 'bass'), ('vocals', 'piano', 'guitar/horns', 'bass')]   # slots 3, 1, 2, 0 per page
-def mix_map(page=None):   # drums + mix: faders / knobs 1-4 = the sample tracks of the song on show; drums the same on both songs
+SONG_PARTS = [('vocals', 'keys', 'horns', 'bass'), ('vocals', 'piano', 'guitar/horns', 'bass'), ('horns/synth', 'piano', 'guitar', 'bass')]   # slots 3, 1, 2, 0 per page
+def mix_map(page=None):   # drums + mix: faders / knobs 1-4 = the sample tracks of the song on show; drums the same on every song
     page = page_now() if page is None else page
-    d, m = (S.A if page == 0 else S.B), {}
+    d, m = S.PAGES[page]['deck'], {}                                   # the song's own deck: A Lowdown, B TOOM, D Disco
     for (fcc, kcc), k, part in zip(((82, 74), (83, 71), (85, 76), (17, 77)), (3, 1, 2, 0), SONG_PARTS[page]):
         m[fcc] = (d, 14 + k, fader, f'{part} vol'); m[kcc] = (d, 24 + k, knob, f'{part} filter')
     m.update({93: (C, 24, knob, 'sample drums filter'), 18: (C, 14, fader, 'sample drums vol'),   # the record's drum stem (deck C)

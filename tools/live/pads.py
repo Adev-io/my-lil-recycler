@@ -4,12 +4,12 @@
 # Bank 3 vox 1/4 .. 1/32 = Recycler STUT on the vocals of the song on show, held while the pad is down (a page click toggles).
 # Top-row Drums / Keys / User buttons (CC 96/97/98) = MiniLab program: drums + mix map (minilab.py) / Synths (acid.py) /
 # Acid Env (acid.py env: filter + amp ADSR). Top-row Session button (CC 95) = drum machine (My lil Drums) on / off, lit yellow = on.
-# Top-row arrows left/right (CC 93/94) = previous/next page (sections.PAGES: 1 Lowdown, 2 Time Out Of Mind, 3 Synths). A page turn changes
+# Top-row arrows left/right (CC 93/94) = previous/next page (sections.PAGES: 1 Lowdown, 2 Time Out Of Mind, 3 Disco Ulysses, 4 Synths). A page turn changes
 # only the pads, never the sound; each page remembers what its rows play. Lit arrow = there is a page that way.
 # Right column round button at a row's end (CC row base + 8, 29 drums .. 89 vocals) = that row's next pad page (sections.pages: samples,
 # samples2, then chop pages = 4-bar A/B halves from chops.json), wrapping to the first; pads only. Dim on page 1, row colour on samples2,
 # row colour pulsing on a chop page, dark on rows with one page. A pad is lit only if its sample is the one playing.
-# Page 3 Synths (synths.py): acid patterns / moves, held fills, arp dir / oct / interval, auto change; the moves row acts on the song last shown.
+# Page 4 Synths (synths.py): acid patterns / moves, held fills, arp dir / oct / interval, auto change; the moves row acts on the song last shown.
 # MIDI only plus one MCP batch per press; sections.py and fx.py are reloaded per press. Stops when pads.stop exists. Log: pads.log.
 import os, sys, time, threading, traceback, importlib, subprocess, mido
 here = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, here)
@@ -20,8 +20,8 @@ STOP = os.path.join(here, 'pads.stop')
 state = {'on': [{} for _ in sections.PAGES], 'page': 0, 'busy': False, 'fx': set(), 'gen': 0, 'dgen': 0, 'snap': None, 'hw': False, 'swept': [], 'tgen': 0, 'hush': {}, 'bank': 0, 'saved': {}, 'agen': 0, 'machine': True, 'fgen': 0, 'fading': False, 'acts': 0,
          'song': 0, 'held': set(), 'auto': set(), 'phrase': 8, 'egen': {}, 'edir': {}, 'slit': set(), 'down': set(), 'vox': {},   # egen / edir: per entry move (acid, arp); vox: fx.vox_on
          'rowpage': {}, 'path': [{} for _ in sections.PAGES]}   # rowpage: (page, row) -> row page on show (sections.pages index); path: per page row -> sample playing
-HUSH = {'drums only': (1, 2, 3, 5, 6), 'no drums': (0, 4)}       # Mixer strips each move silences: drums only = Acid, decks A/B,
-                                                                 # Acid Voice, Triple; no drums = My lil Drums + the drum stem
+HUSH = {'drums only': (1, 2, 3, 5, 6, 7), 'no drums': (0, 4)}    # Mixer strips each move silences: drums only = Acid, decks A/B,
+                                                                 # Acid Voice, Triple, deck D; no drums = My lil Drums + the drum stem
 lp = lambda names, pre: next((x for x in names if x.startswith(pre)), None)        # Launchpad unplugged -> page only
 lock = threading.Lock()                                          # Launchpad sends AND closes happen under it: send on a closed rtmidi port = segfault
 _dead = []          # ports that must never be closed or freed again: RtMidi WinMM closePort on an unplugged device frees its sysex buffers, then fails
@@ -167,7 +167,7 @@ def fx_act(name):
         if name in state['fx']:                                   # release = snap back (the drop)
             state['fx'].discard(name)
             for d in state['swept']: fx.set_deck_filters(d, fx.BASEF[d])
-        else:                                                     # only the song on show (page 1 Lowdown, page 2 TOOM)
+        else:                                                     # only the song on show (page 1 Lowdown, 2 TOOM, 3 Disco)
             decks = fx.song_decks(SP(), state['path'])            # path: the drums row counts while it plays from any row page
             for d in set(state['swept']) - set(decks): fx.set_deck_filters(d, fx.BASEF[d])
             state['fx'] -= {'sweep up', 'sweep down'}; state['fx'].add(name); state['swept'] = decks
