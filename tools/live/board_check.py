@@ -51,7 +51,7 @@ assert set(synths.ENTRY) == {'acid in/out', 'arp in/out'}
 import fx                                                                   # Synths actions offline: stub the rig, put it back after
 real = dict(setp=synths.setp, getp=synths.getp, arp_dir=synths.arp_dir, arp_data=synths.arp_data)
 real_fx = dict(acid_cutoff=fx.acid_cutoff, set_strip_map=fx.set_strip_map, bars_secs=fx.bars_secs, STEP=fx.STEP)
-sent, rig = [], {S.ACID: {24: 10.0}, synths.ARP: {16: 1.0, 18: 2.0, 19: 0.6}}
+sent, rig = [], {S.ACID: {24: 10.0}, synths.ARP: {16: 1.0, 18: 2.0, 19: 0.6, 20: 2.0}}
 class Rng:
     def __init__(s, *v): s.v = list(v)
     def random(s): return s.v.pop(0)
@@ -94,13 +94,14 @@ try:
     fx.acid_cutoff = cutoff; assert sent[-1] == ('cut', 0.4) and synths._open == {}, sent
     sent.clear(); synths.arp_in(0.5, lambda: True); g = [v[19] for k, v in sent if k == synths.ARP and 19 in v]        # arp in: short -> 0.6, roll x4 released
     assert g[0] == 0.05 and g[-1] == 0.6 and (synths.ARP, {20: 4.0, 21: 1.0}) in sent and (synths.ARP, {21: 0.0}) in sent and synths._open == {}, sent
+    assert sent.index((synths.ARP, {20: 2.0})) > sent.index((synths.ARP, {20: 4.0, 21: 1.0})), sent        # ROLLS (param 20) put back at 2 after the x4
     rig['cut'] = 0.4; synths._open.clear(); sent.clear()                     # out reaches its end, but a newer press came in on the last step:
     synths.acid_out(lambda: rig['cut'] > 0.05 + 1e-9)                          # no strip down, no cutoff restore, _open kept for the newer one
     assert not any(k == 'strip' for k, _ in sent) and sent[-1][0] == 'cut' and abs(sent[-1][1] - 0.05) < 1e-9 and synths._open == {'cut': 0.4}, sent
     live = [True]                                                            # arp_in cut off during its roll: lets go of its own roll x4,
     synths.setp = lambda mid, vals: (sent.append((mid, dict(vals))), vals.get(21) == 1.0 and live.__setitem__(0, False))   # then no gate write
     synths._open.clear(); sent.clear(); synths.arp_in(0.5, lambda: live[0]); i = sent.index((synths.ARP, {20: 4.0, 21: 1.0}))
-    assert sent[i + 1:] == [(synths.ARP, {21: 0.0})] and synths._open == {'gate': 0.6}, sent
+    assert sent[i + 1:] == [(synths.ARP, {21: 0.0}), (synths.ARP, {20: 2.0})] and synths._open == {'gate': 0.6}, sent
     synths.setp = lambda mid, vals: sent.append((mid, dict(vals)))
     rig[synths.ARP][21] = 1.0; synths._open.clear(); sent.clear(); synths.arp_in(0.5, lambda: True)   # arp roll fill held: no x4, no release
     assert not any(k == synths.ARP and 21 in v for k, v in sent) and synths._open == {}, sent
@@ -109,6 +110,27 @@ finally:
     for k, v in real.items(): setattr(synths, k, v)
     for k, v in real_fx.items(): setattr(fx, k, v)
     synths._open.clear()
-print('Synths offline: auto_step mutate/next/undo + first-of-song + acid error keeps arp, hold-button release, octjump at 4, ramp cut-off, cancelled acid_out writes nothing after, acid_in floor 0.5, exception restores open, arp_in roll,'
+real_dnb = dict(bpm=fx.bpm, strips=fx.strips, set_strips=fx.set_strips, STEP=fx.STEP, cdp=S.current_drum_pattern, dp=S.drum_pattern)
+try:                                                                            # dnb release + clean return to the tempo the set was at (not 120)
+    now = {'bpm': 128.0, 'strips': [0.5] * 8, 'pat': 3}
+    fx.bpm = lambda v=None: now['bpm'] if v is None else now.__setitem__('bpm', v)
+    fx.strips = lambda: list(now['strips']); fx.set_strips = lambda v: now.__setitem__('strips', list(v))
+    S.current_drum_pattern = lambda: now['pat']; S.drum_pattern = lambda p: now.__setitem__('pat', p); fx.STEP = 0.002
+    snap = fx.snapshot(); assert snap['bpm'] == 128.0, snap
+    now['bpm'], now['pat'] = 140.0, fx.BREAK; saved = dict(fx.DNB); fx.DNB['release'] = 0.02
+    try: assert fx.dnb_off(snap, lambda: True) is None
+    finally: fx.DNB.update(saved)
+    assert now['bpm'] == 128.0 and now['pat'] == 3, now                         # release ends at 128
+    now['bpm'], now['pat'] = 140.0, fx.BREAK; fx.restore(snap); assert now['bpm'] == 128.0 and now['pat'] == 3, now   # clean while dnb is on
+    old = {k: v for k, v in snap.items() if k != 'bpm'}; now['bpm'] = 140.0; fx.restore(old); assert now['bpm'] == 120.0, now     # old snapshot: 120
+    now['bpm'] = 140.0; fx.DNB['release'] = 0.02
+    try: fx.dnb_off(old, lambda: True)
+    finally: fx.DNB.update(saved)
+    assert now['bpm'] == 120.0, now
+finally:
+    fx.bpm, fx.strips, fx.set_strips, fx.STEP = (real_dnb[k] for k in ('bpm', 'strips', 'set_strips', 'STEP'))
+    S.current_drum_pattern, S.drum_pattern = real_dnb['cdp'], real_dnb['dp']
+print('DnB offline: snapshot records the set tempo, release + clean return to it (128), a snapshot without bpm falls back to 120')
+print('Synths offline: auto_step mutate/next/undo + first-of-song + acid error keeps arp, hold-button release, octjump at 4, ramp cut-off, cancelled acid_out writes nothing after, acid_in floor 0.5, exception restores open, arp_in roll + ROLLS put back,'
       ' finished out after a newer press writes nothing, arp_in cut off in its roll writes no gate, held arp roll left alone')
 print('ok')

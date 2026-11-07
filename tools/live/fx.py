@@ -78,14 +78,14 @@ def ramp(to_bpm, to_strips, secs, alive):          # eased move from where the r
         if x >= 1.0: return True
         time.sleep(STEP)
 BREAK = 9                              # My lil Drums pattern 9 = Amen-style 2-bar break (written 2026-11-05; old one in drums_pattern9.bak.json)
-def snapshot(): return dict(strips=strips(), drums=S.current_drum_pattern())
-def restore(snap): bpm(BPM); set_strips(snap['strips']); S.drum_pattern(snap['drums'])
+def snapshot(): return dict(strips=strips(), drums=S.current_drum_pattern(), bpm=bpm())   # the set's tempo, not a fixed 120
+def restore(snap): bpm(snap.get('bpm', BPM)); set_strips(snap['strips']); S.drum_pattern(snap['drums'])
 def dnb_on(snap, alive):               # the break kicks in on the press
     S.drum_pattern(BREAK)
     keep = [v if k in DNB_KEEP else 0.0 for k, v in enumerate(snap['strips'])]
     if ramp(DNB['peak'], keep, DNB['attack'], alive) and DNB['decay'] > 0: ramp(DNB['sustain'], keep, DNB['decay'], alive)
 def dnb_off(snap, alive):              # the break rides the release down, then the old pattern returns
-    if ramp(BPM, snap['strips'], DNB['release'], alive): S.drum_pattern(snap['drums'])
+    if ramp(snap.get('bpm', BPM), snap['strips'], DNB['release'], alive): S.drum_pattern(snap['drums'])
 
 # Bank 2 (2026-11-06, Ari: the round button at the right end of the moves row flips to 8 more moves). pads.py keeps the toggles.
 FX2 = {11: 'acid in/out', 12: 'arp in/out', 13: 'voice in/out', 14: 'acid sweep', 15: 'break fill', 16: 'no bass', 17: 'no vocals', 18: 'breakdown'}

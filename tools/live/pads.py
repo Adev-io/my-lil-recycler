@@ -227,7 +227,7 @@ def fx_act(name):
         for n in ('acid sweep', 'no bass', 'no vocals', 'breakdown'):
             if n in state['fx']: release(n)
         state['gen'] += 1; state['tgen'] += 1
-        if 'dnb' in state['fx']: state['dgen'] += 1; fx.restore(state['snap'])   # snap back to 120, strips + drum pattern as before
+        if 'dnb' in state['fx']: state['dgen'] += 1; fx.restore(state['snap'])   # snap back to the tempo from before, strips + drum pattern as before
         for n in list(state['hush']): fx.set_strip_map(state['hush'].pop(n))
         fx.clean(); state['fx'] = set()
     LOG.write(time.ctime() + f" fx {name} -> {sorted(state['fx'])}\n")

@@ -145,9 +145,9 @@ def arp_in(level, alive):                                            # strip up,
         arp_gate(SHORT); fx.set_strip_map({6: level})
         ok = ramp(arp_gate, SHORT, g, fx.bars_secs(2) - fx.bars_secs(0.25), alive)
         if ok and alive() and not getp(ARP).get(R_ROLLBTN, 0.0):    # a held arp roll fill keeps its roll: no x4, no release
-            roll(4)
+            r0 = getp(ARP)[R_ROLLN]; roll(4)                          # ROLLS goes back to what it was after the fill
             try: time.sleep(fx.bars_secs(0.25))
-            finally: roll(None)
+            finally: roll(None); setp(ARP, {R_ROLLN: r0})
     finally:
         if ok is not False and alive(): arp_gate(g); _open.pop('gate', None)
 def arp_out(alive):
