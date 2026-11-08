@@ -100,7 +100,7 @@ LANE_X, LANE_SIZE = 95.0, 2.2   # the lane's role letter, left of the view
 def lane_letters():
     x, y, w, h = REGIONS['DECK_VIEW']
     return [(r[0], y + h / 8 * (2 * i + 1) + 0.73 * LANE_SIZE / 2) for i, r in enumerate(ROLES)]   # letter, baseline
-NAME_BOX = [(4.0, y - 3.0, 54.0, 6.0) for y in STEM_Y]
+NAME_BOX = [(4.0, y - 3.0, 49.0, 6.0) for y in STEM_Y]   # 54 -> 49 in 2.4: STUT sits right of it
 
 # (name, kind, x, y, label). A name ending in '+i' is stem i of a per-stem array.
 RECYCLER = [
@@ -111,7 +111,9 @@ RECYCLER = [
     ('RUN_PARAM', 'button', 82.0, ROW_LOCK, 'RUN'), ('RUN_LIGHT', 'light', 88.0, 29.0, ''),
     ('CLOCK_INPUT', 'seq', 14.0, ROW_JACK, 'CLOCK'), ('VOCT_INPUT', 'cv', 34.0, ROW_JACK, 'V/OCT'),
     ('RESET_INPUT', 'seq', 52.0, ROW_JACK, 'RESET'), ('RUN_INPUT', 'seq', 66.0, ROW_JACK, 'RUN'),
+    ('STUTLEN_PARAM', 'small', 82.0, ROW_JACK, 'STUT LEN'),
 ] + [part for i, y in enumerate(STEM_Y) for part in (
+    ('STUT_PARAM+%d' % i, 'button', 58.0, y, 'STUT'),
     ('ROLL_PARAM+%d' % i, 'button', 66.0, y, 'ROLL'),
     ('LOCK_PARAM+%d' % i, 'button', 76.0, y, 'LOCK'),
     ('LOCK_LIGHT+%d' % i, 'light', 80.5, y - 4.0, ''),

@@ -28,6 +28,7 @@ changed files. The cache is shared by every Recycler you have.
 | **BARS** | Loop length: 1, 2, 4 or 8 bars (click to step; the tooltip shows which). |
 | **RUN** / RUN gate | Start and stop. A patched gate overrides the button. The light shows running. |
 | **RESET** | Back to the top of the loop. With a clock patched, on the next pulse. |
+| **STUT LEN** | The slice a held STUT repeats: 1/4, 1/8, 1/16 or 1/32 bar. One knob, shared by all four slots: see [STUT](#stut). |
 
 Changing tempo, root, mode or bars re-renders the stems after a short pause (0.2 s of no change). Until the new
 renders land, the old ones keep playing in time. Tempo wobble under 1 % is ignored. The **RENDER** light blinks
@@ -42,6 +43,7 @@ Four rows: **DRUMS**, **BASS**, **MELODY**, **TEXTURE**.
 | **ROLL** button / jack | A new file for that slot. The trigger works too. |
 | **LOCK** | Keeps the slot's file when you BATCH. The light is lime while locked. |
 | **LEVEL** | Stem volume, up to +6 dB. More per-slot controls: see [Shaping each slot](#shaping-each-slot). |
+| **STUT** | Hold to repeat a slice of the slot on the beat grid: see [STUT](#stut). |
 | **OUT L / R** | The stem on its own: about ±5 V at 0 dB, up to about ±10 V at +6 dB. L carries the mono sum while R is unpatched. |
 
 A new file comes in on the next loop start, with a short crossfade. The name beside each role: white = playing,
@@ -122,6 +124,22 @@ Every slot row has its own shaping controls. They belong to the slot, so they st
 
 Patches saved with 2.1 load with these at neutral and sound the same. The panel is 36 HP now: in an older patch, drag the
 module to its right out of the way once.
+
+## STUT
+
+Hold a slot's **STUT** button (left of ROLL) and that slot repeats one slice: the slice that began on the last grid point
+at or before the press. The grid is the slot's loop cut into **STUT LEN** pieces per bar: 1/4, 1/8 (default), 1/16 or
+1/32 bar. The first pass plays on from where you pressed, then the slice repeats, each seam with a 3 ms fade. The loop
+keeps running underneath, so on release the slot is back exactly where the song is (with the same short declick as
+START and REV).
+
+- START and REV still apply: a reversed slot stutters its reversed audio.
+- Turn STUT LEN while holding and the slot jumps onto the new grid where the song is now, with no gap (a slide from 1/4
+  to 1/8 keeps going).
+- A new file landing while you hold stutters from its own grid point; so does a RESET (or a clock jump), and a restart
+  after a stop lands on the beat.
+- STUT LEN is one knob for all four slots.
+- A hold is never saved: a patch always loads with STUT up. Patches from 2.3 and older load with STUT LEN at 1/8.
 
 ## Right-click menu
 
