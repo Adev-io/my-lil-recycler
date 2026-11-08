@@ -58,8 +58,8 @@ def selftest():
 def find_stems(d):
     found = {}
     for f in sorted(os.listdir(d)):
-        m = re.search(r'_\((\w+)\)_', f)
-        if m and m.group(1) in STEMS and f.lower().endswith('.wav'): found[m.group(1)] = os.path.join(d, f)
+        tags = [t for t in re.findall(r'_\((\w+)\)_', f) if t in STEMS]       # every (tag): a song title can be bracketed too
+        if tags and f.lower().endswith('.wav'): found[tags[-1]] = os.path.join(d, f)
     missing = [s for s in STEMS if s not in found]
     assert not missing, f'missing stems {missing} in {d}'
     return found
