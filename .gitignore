@@ -16,3 +16,4 @@ tools/live/*.wav
 tools/live/page.txt
 tools/live/minilab.mode
 tools/live/drums_level.json
+tools/live/chops.json
